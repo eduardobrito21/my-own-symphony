@@ -1,0 +1,26 @@
+{
+  "name": "@symphony/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Symphony orchestrator daemon",
+  "main": "./dist/index.js",
+  "bin": {
+    "symphony": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean && rm -rf dist",
+    "dev": "tsx --watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@symphony/types": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
