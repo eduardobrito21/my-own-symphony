@@ -36,7 +36,8 @@ changes are reconciled every tick, stalled runs are killed, and editing
    - Normal exit → `completed.add(issueId)`, schedule continuation
      retry.
    - Abnormal exit → schedule failure-driven retry.
-   - In both cases, accumulate runtime seconds into `codex_totals`.
+   - In both cases, accumulate runtime seconds into `agent_totals`
+     (renamed from spec's `codex_totals` — see ADR 0008).
 3. **Reconciliation** in
    `packages/daemon/src/orchestrator/reconcile.ts`:
    - Stall detection: per running issue, if
