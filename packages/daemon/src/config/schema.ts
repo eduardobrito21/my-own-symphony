@@ -64,6 +64,8 @@ export function buildServiceConfigSchema(baseDir: string) {
       // `kind` is REQUIRED for dispatch (SPEC §5.3.1) but not for parse.
       // We accept any string here; the orchestrator's startup preflight
       // checks for a supported value before scheduling work.
+      // Implementation values: 'linear' (Plan 06) and 'fake' (Plan 02 +
+      // Plan 04 dev runs).
       kind: z.string().min(1).optional(),
       endpoint: z.string().url().default('https://api.linear.app/graphql'),
       api_key: envBackedString.optional(),
@@ -72,6 +74,23 @@ export function buildServiceConfigSchema(baseDir: string) {
       terminal_states: z
         .array(z.string().min(1))
         .default(['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done']),
+      // Fake-tracker only: where to load initial issues from. Path is
+      // resolved relative to the workflow file's directory.
+      fixture_path: z
+        .string()
+        .min(1)
+        .transform((value, ctx) => {
+          const resolved = resolvePath(value, baseDir);
+          if (resolved === undefined) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Environment variable referenced in tracker.fixture_path '${value}' is unset or empty.`,
+            });
+            return z.NEVER;
+          }
+          return resolved;
+        })
+        .optional(),
     })
     .strict()
     .default({});

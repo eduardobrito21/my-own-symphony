@@ -1,51 +1,161 @@
-// Symphony daemon entry point (composition root).
+// Symphony daemon entry point — composition root.
 //
-// As of Plan 01, this is a CLI that loads a `WORKFLOW.md`, applies defaults,
-// resolves env/path indirection, and prints the parsed config + prompt
-// template as JSON. Later plans will replace the print with actual scheduling.
+// Loads `WORKFLOW.md`, constructs every collaborator, wires the
+// orchestrator, and starts the polling loop. SIGINT and SIGTERM
+// trigger a graceful shutdown.
+//
+// Plan 04 scope: fake tracker + mock agent only. Real Linear arrives
+// in Plan 06; real Claude in Plan 07.
 //
 // Usage:
-//
 //   symphony [path/to/WORKFLOW.md]
 //
-// If no path is given, defaults to `./WORKFLOW.md` in the current working
-// directory (matches SPEC §5.1 path precedence and the upstream Elixir CLI).
-//
-// Exit codes:
-//   0 — workflow loaded and printed successfully
-//   1 — load failed (printed error to stderr)
-//   2 — invalid CLI usage
+// Defaults to `./WORKFLOW.md` per SPEC §5.1.
 
 import { resolve } from 'node:path';
 import { argv, exit, stderr, stdout } from 'node:process';
 
 import { formatWorkflowError } from './config/errors.js';
 import { loadWorkflow } from './config/loader.js';
+import type { ServiceConfig } from './config/schema.js';
+import { MockAgent } from './agent/mock/index.js';
+import { createConsoleLogger, type Logger } from './observability/index.js';
+import { Orchestrator } from './orchestrator/index.js';
+import { FakeTracker, loadFixture } from './tracker/fake/index.js';
+import type { Tracker } from './tracker/tracker.js';
+import { WorkspaceManager } from './workspace/index.js';
 
 async function main(): Promise<number> {
-  // argv[0] is `node`, argv[1] is the script path. The first user argument
-  // is at index 2. We accept an optional positional path; everything after
-  // it is reserved for future flags (Plan 05 will add `--logs-root` etc.).
   const positional = argv.slice(2).filter((arg) => !arg.startsWith('-'));
   if (positional.length > 1) {
-    stderr.write(`usage: symphony [path-to-WORKFLOW.md]\n`);
+    stderr.write('usage: symphony [path-to-WORKFLOW.md]\n');
     return 2;
   }
 
   const workflowPath = resolve(positional[0] ?? './WORKFLOW.md');
+  const logger = createConsoleLogger();
 
-  const result = await loadWorkflow(workflowPath);
-  if (!result.ok) {
-    stderr.write(`${formatWorkflowError(result.error)}\n`);
+  // ---- Workflow ----
+  const workflowResult = await loadWorkflow(workflowPath);
+  if (!workflowResult.ok) {
+    stderr.write(`${formatWorkflowError(workflowResult.error)}\n`);
     return 1;
   }
+  const { config, promptTemplate } = workflowResult.value;
+  logger.info('workflow loaded', {
+    workflow_path: workflowPath,
+    tracker_kind: config.tracker.kind ?? '<unset>',
+  });
 
-  // Print the loaded workflow as pretty-printed JSON. This is the Phase 1
-  // smoke-test surface — operators can verify their `WORKFLOW.md` is being
-  // interpreted as they expect before any scheduling happens.
-  stdout.write(`${JSON.stringify(result.value, null, 2)}\n`);
-  return 0;
+  // ---- Tracker ----
+  const tracker = await buildTracker(config, workflowPath, logger);
+  if (tracker === null) return 1;
+
+  // ---- Workspace manager ----
+  const workspaceManager = new WorkspaceManager({
+    root: config.workspace.root,
+    hooks: config.hooks,
+    logger,
+  });
+  logger.info('workspace manager ready', { root: config.workspace.root });
+
+  // ---- Agent ----
+  // Plan 04: only the mock agent is wired. Plan 07 will introduce
+  // real Claude and a `agent.kind` switch.
+  const agent = new MockAgent({
+    turnDurationMs: 800,
+    notifications: ['analyzing', 'planning', 'implementing'],
+  });
+  logger.info('agent ready', { kind: 'mock' });
+
+  // ---- Orchestrator ----
+  const orchestrator = new Orchestrator({
+    config,
+    promptTemplateSource: promptTemplate,
+    tracker,
+    workspaceManager,
+    agent,
+    logger,
+  });
+
+  // ---- Signal handling ----
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('signal received', { signal });
+    void orchestrator.stop().then(() => {
+      logger.info('clean shutdown complete');
+      // Use a small delay so the final log line flushes before
+      // process.exit short-circuits stderr buffering.
+      setTimeout(() => {
+        exit(0);
+      }, 50);
+    });
+  };
+  process.on('SIGINT', () => {
+    shutdown('SIGINT');
+  });
+  process.on('SIGTERM', () => {
+    shutdown('SIGTERM');
+  });
+
+  orchestrator.start();
+  // The process stays alive because the timer keeps the event loop
+  // busy. We do not `await` orchestrator.stop() here — it's only
+  // called from the signal handler.
+  return await new Promise<number>(() => {
+    // Never resolves on the happy path; the signal handler is the
+    // only exit. We return a never-resolving promise so TypeScript
+    // sees a Promise<number> return type.
+  });
 }
 
-const code = await main();
-exit(code);
+async function buildTracker(
+  config: ServiceConfig,
+  workflowPath: string,
+  logger: Logger,
+): Promise<Tracker | null> {
+  const kind = (config.tracker.kind ?? 'fake').toLowerCase();
+  if (kind === 'linear') {
+    // Plan 06 will provide LinearTracker. Until then, fail with a
+    // clear message.
+    logger.error('tracker.kind=linear not yet implemented (arriving in Plan 06)', {
+      workflow_path: workflowPath,
+    });
+    return null;
+  }
+  if (kind === 'fake') {
+    return await buildFakeTracker(config, logger);
+  }
+  logger.error('unsupported tracker.kind', { kind });
+  return null;
+}
+
+async function buildFakeTracker(config: ServiceConfig, logger: Logger): Promise<Tracker | null> {
+  if (config.tracker.fixture_path === undefined) {
+    logger.warn('tracker.kind=fake without tracker.fixture_path; FakeTracker will be empty');
+    return new FakeTracker([]);
+  }
+  const fixture = await loadFixture(config.tracker.fixture_path);
+  if (!fixture.ok) {
+    logger.error('failed to load fixture', {
+      code: fixture.code,
+      message: fixture.message,
+      path: fixture.path,
+    });
+    return null;
+  }
+  logger.info('fixture loaded', {
+    path: config.tracker.fixture_path,
+    count: fixture.issues.length,
+  });
+  // The unused `stdout` import lint trick: keep the symbol referenced
+  // so eslint doesn't complain. (We may use stdout in future demos.)
+  void stdout;
+  return new FakeTracker(fixture.issues);
+}
+
+await main().then((code) => {
+  exit(code);
+});
