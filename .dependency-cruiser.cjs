@@ -73,7 +73,7 @@ module.exports = {
         '`tracker/` may only depend on `types/` and `config/`. Trackers are leaves — they fetch and normalize, nothing else.',
       from: { path: 'packages/daemon/src/tracker/' },
       to: {
-        path: 'packages/daemon/src/(?!types/|config/|tracker/)',
+        path: 'packages/daemon/src/(?!types/|config/|tracker/|observability/)',
         pathNot: 'node_modules',
       },
     },
@@ -81,10 +81,10 @@ module.exports = {
       name: 'workspace-only-types-config',
       severity: 'error',
       comment:
-        '`workspace/` may only depend on `types/` and `config/`. Workspace management is filesystem-only — it must not know about trackers, agents, or the orchestrator.',
+        '`workspace/` may only depend on `types/`, `config/`, and `observability/` (the cross-cutting logger). Workspace management is filesystem-only — it must not know about trackers, agents, or the orchestrator.',
       from: { path: 'packages/daemon/src/workspace/' },
       to: {
-        path: 'packages/daemon/src/(?!types/|config/|workspace/)',
+        path: 'packages/daemon/src/(?!types/|config/|workspace/|observability/)',
         pathNot: 'node_modules',
       },
     },
@@ -92,10 +92,10 @@ module.exports = {
       name: 'agent-only-types-config-workspace',
       severity: 'error',
       comment:
-        '`agent/` may depend on `types/`, `config/`, and `workspace/`. It must not depend on `tracker/` or `orchestrator/` — agent runs are driven by the orchestrator, not the other way around.',
+        '`agent/` may depend on `types/`, `config/`, `workspace/`, and `observability/`. It must not depend on `tracker/` or `orchestrator/` — agent runs are driven by the orchestrator, not the other way around.',
       from: { path: 'packages/daemon/src/agent/' },
       to: {
-        path: 'packages/daemon/src/(?!types/|config/|workspace/|agent/)',
+        path: 'packages/daemon/src/(?!types/|config/|workspace/|agent/|observability/)',
         pathNot: 'node_modules',
       },
     },
