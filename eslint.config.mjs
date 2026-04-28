@@ -49,6 +49,14 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+
+      // Numbers and booleans are fine in template literals. Restricting to
+      // strings only would force awkward `${String(n)}` casts in every
+      // error message and log line — not a tradeoff that earns its keep.
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        { allowNumber: true, allowBoolean: true },
+      ],
     },
   },
   {
