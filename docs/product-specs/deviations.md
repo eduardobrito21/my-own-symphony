@@ -129,13 +129,24 @@ agent's `linear_graphql` tool. The orchestrator is a reader.
 
 ---
 
-### Codex CLI environment-variable conventions — **Substituted**
+### `codex.*` front-matter section — **Restructured**
 
-**Spec:** the Elixir reference uses `CODEX_BIN` for the Codex command.
+**Spec:** SPEC §5.3.6 defines a `codex` section with `command`,
+`approval_policy`, `thread_sandbox`, `turn_sandbox_policy`,
+`turn_timeout_ms`, `read_timeout_ms`, and `stall_timeout_ms`.
 
-**Here:** no Codex command needed. The Claude Agent SDK reads
-`ANTHROPIC_API_KEY` directly. The `codex.command` config field is
-preserved for spec compatibility but is ignored by our agent layer.
+**Here:** the Codex-specific fields (`command`, the three policy
+fields) are dropped — the Claude Agent SDK has no equivalents. The
+generic timeout fields (`turn_timeout_ms`, `read_timeout_ms`,
+`stall_timeout_ms`) are folded into `agent.*` since they describe
+agent runtime behavior regardless of backend.
+
+**Reasoning:** [ADR 0008](../design-docs/0008-fold-codex-section-into-agent.md)
+
+**Migration:** an upstream `WORKFLOW.md` containing `codex.*` still
+parses (top-level `.passthrough()` carries the section through), but
+the values are ignored. To migrate, move the timeouts to `agent.*` and
+delete the rest.
 
 ---
 

@@ -16,7 +16,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "tsc --build --clean && rm -rf dist"
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "tsc --build tsconfig.build.json --clean && rm -rf dist"
   }
 }

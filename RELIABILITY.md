@@ -37,7 +37,7 @@ outside the workspace root.
 ### 3. Agent session failures
 
 Examples: SDK initialization error, turn timeout, agent process exit, stalled
-session (no events for `codex.stall_timeout_ms`).
+session (no events for `agent.stall_timeout_ms`).
 
 - Worker exits abnormally → orchestrator schedules a retry with exponential
   backoff: `min(10000 * 2^(attempt - 1), agent.max_retry_backoff_ms)`.
@@ -81,12 +81,12 @@ Per running issue, every tick:
 
 ```
 elapsed = now - (lastEventAt ?? startedAt)
-if elapsed > codex.stallTimeoutMs:
+if elapsed > agent.stallTimeoutMs:
   terminate worker
   schedule failure-driven retry
 ```
 
-If `codex.stallTimeoutMs <= 0`, stall detection is disabled (used for tests
+If `agent.stallTimeoutMs <= 0`, stall detection is disabled (used for tests
 and rare production debug scenarios).
 
 ## Reconciliation against the tracker

@@ -1,10 +1,18 @@
 {
+  // No-emit config consumed by ESLint and the IDE language server.
+  // Includes test files (which the build config excludes). The reference
+  // points at `tsconfig.build.json` because TS project references require
+  // the *referenced* project to have `composite: true`, and our sibling
+  // `tsconfig.json` files are no-emit (composite: false). Pointing here
+  // keeps cross-package go-to-definition working without a prior build.
+
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "noEmit": true,
+    "composite": false
   },
   "include": ["src/**/*"],
-  "exclude": ["dist", "node_modules", "**/*.test.ts", "**/*.spec.ts"],
-  "references": [{ "path": "../types" }]
+  "exclude": ["dist", "node_modules"],
+  "references": [{ "path": "../types/tsconfig.build.json" }]
 }

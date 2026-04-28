@@ -38,7 +38,11 @@ mock agent, ticks every poll interval, dispatches issues into mock
    - Useful as a test double and for `pnpm dev` against fixtures.
 3. **`OrchestratorState`** in
    `packages/daemon/src/orchestrator/state.ts`:
-   - In-memory map structures matching §4.1.8 fields.
+   - In-memory map structures matching SPEC §4.1.8 fields. Per ADR
+     0008, fields named `codex_*` in the spec (e.g. `codex_totals`,
+     `codex_rate_limits`, `codex_app_server_pid`,
+     `codex_input_tokens`, etc.) are renamed to `agent_*` for
+     consistency with the schema rename.
    - All state mutations happen through a single `Orchestrator` class;
      mutator methods are the only public surface.
 4. **Single-authority orchestrator** in
