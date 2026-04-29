@@ -14,14 +14,17 @@
 //
 // Defaults to `./WORKFLOW.md` per SPEC §5.1.
 
+import { env, exit, stderr, stdout, argv } from 'node:process';
 import { resolve } from 'node:path';
-import { argv, exit, stderr, stdout } from 'node:process';
 
+import { ClaudeAgent } from './agent/claude/agent.js';
+import { LINEAR_SKILL_MARKDOWN } from './agent/claude/linear-skill-loader.js';
+import { MockAgent } from './agent/mock/index.js';
+import type { AgentRunner } from './agent/runner.js';
 import { formatWorkflowError } from './config/errors.js';
 import { loadWorkflow } from './config/loader.js';
 import type { ServiceConfig } from './config/schema.js';
 import { WorkflowWatcher } from './config/watch.js';
-import { MockAgent } from './agent/mock/index.js';
 import { createConsoleLogger, type Logger } from './observability/index.js';
 import { Orchestrator } from './orchestrator/index.js';
 import { startupTerminalCleanup } from './orchestrator/startup.js';
@@ -52,8 +55,16 @@ async function main(): Promise<number> {
     tracker_kind: config.tracker.kind ?? '<unset>',
   });
 
+  // ---- Linear client (shared by tracker + agent tool, when wired) ----
+  // We build at most one `LinearClient`. Both the LinearTracker
+  // (read-only polling) and the ClaudeAgent's `linear_graphql` tool
+  // (read+write) talk through this single instance, so auth, transport,
+  // and error handling all live in one place. See ADR 0002 + Plan 07
+  // decision log entry "Reusing LinearClient between tracker and tool".
+  const linearClient = maybeBuildLinearClient(config, workflowPath, logger);
+
   // ---- Tracker ----
-  const tracker = await buildTracker(config, workflowPath, logger);
+  const tracker = await buildTracker(config, workflowPath, logger, linearClient);
   if (tracker === null) return 1;
 
   // ---- Workspace manager ----
@@ -65,13 +76,11 @@ async function main(): Promise<number> {
   logger.info('workspace manager ready', { root: config.workspace.root });
 
   // ---- Agent ----
-  // Plan 04: only the mock agent is wired. Plan 07 will introduce
-  // real Claude and a `agent.kind` switch.
-  const agent = new MockAgent({
-    turnDurationMs: 800,
-    notifications: ['analyzing', 'planning', 'implementing'],
-  });
-  logger.info('agent ready', { kind: 'mock' });
+  // Plan 07 introduces a backend selector. Default is `mock` for back-
+  // compat with pre-Plan-07 workflows; `claude` switches to the real
+  // Claude Agent SDK runner.
+  const agent = buildAgent(config, logger, linearClient);
+  if (agent === null) return 1;
 
   // ---- Orchestrator ----
   const orchestrator = new Orchestrator({
@@ -141,14 +150,50 @@ async function main(): Promise<number> {
   });
 }
 
+/**
+ * Construct a `LinearClient` if either side of the daemon needs one
+ * (tracker `kind=linear` OR agent `kind=claude`). Returns `null` when
+ * neither side wants Linear traffic — the FakeTracker + MockAgent path
+ * never touches the network, so we don't construct an unused client
+ * (and don't demand `tracker.api_key` for tests).
+ *
+ * The same instance is then passed to both the tracker (read-only)
+ * and the ClaudeAgent's `linear_graphql` tool (read+write) so auth +
+ * transport stay a single source of truth (Plan 07 decision).
+ */
+function maybeBuildLinearClient(
+  config: ServiceConfig,
+  workflowPath: string,
+  logger: Logger,
+): LinearClient | null {
+  const trackerKind = (config.tracker.kind ?? 'fake').toLowerCase();
+  const agentKind = (config.agent.kind ?? 'mock').toLowerCase();
+  const needsLinear = trackerKind === 'linear' || agentKind === 'claude';
+  if (!needsLinear) return null;
+
+  const apiKey = config.tracker.api_key;
+  if (apiKey === undefined) {
+    logger.error(
+      'tracker.api_key is required when tracker.kind=linear or agent.kind=claude (use $LINEAR_API_KEY)',
+      { workflow_path: workflowPath },
+    );
+    return null;
+  }
+  return new LinearClient({
+    endpoint: config.tracker.endpoint,
+    apiKey,
+  });
+}
+
 async function buildTracker(
   config: ServiceConfig,
   workflowPath: string,
   logger: Logger,
+  linearClient: LinearClient | null,
 ): Promise<Tracker | null> {
   const kind = (config.tracker.kind ?? 'fake').toLowerCase();
   if (kind === 'linear') {
-    return buildLinearTracker(config, workflowPath, logger);
+    return buildLinearTracker(config, workflowPath, logger, linearClient);
   }
   if (kind === 'fake') {
     return await buildFakeTracker(config, logger);
@@ -161,17 +206,11 @@ function buildLinearTracker(
   config: ServiceConfig,
   workflowPath: string,
   logger: Logger,
+  linearClient: LinearClient | null,
 ): Tracker | null {
-  // SPEC §6.3 dispatch preflight checks. We do them here too so a
-  // missing project_slug or api_key fails before we wire the
-  // orchestrator at all.
-  const apiKey = config.tracker.api_key;
-  if (apiKey === undefined) {
-    logger.error('tracker.kind=linear requires tracker.api_key (use $LINEAR_API_KEY)', {
-      workflow_path: workflowPath,
-    });
-    return null;
-  }
+  // SPEC §6.3 dispatch preflight: project_slug is required for
+  // LinearTracker. The api_key check happens in
+  // `maybeBuildLinearClient` (it covers the agent path too).
   const projectSlug = config.tracker.project_slug;
   if (projectSlug === undefined) {
     logger.error('tracker.kind=linear requires tracker.project_slug', {
@@ -179,15 +218,75 @@ function buildLinearTracker(
     });
     return null;
   }
-  const client = new LinearClient({
-    endpoint: config.tracker.endpoint,
-    apiKey,
-  });
+  if (linearClient === null) {
+    // Should have been built upstream — defensive only.
+    logger.error('internal: linear client not constructed for tracker.kind=linear', {
+      workflow_path: workflowPath,
+    });
+    return null;
+  }
   logger.info('linear tracker ready', {
     endpoint: config.tracker.endpoint,
     project_slug: projectSlug,
   });
-  return new LinearTracker({ client, projectSlug });
+  return new LinearTracker({ client: linearClient, projectSlug });
+}
+
+/**
+ * Pick the right `AgentRunner` based on `agent.kind`:
+ *
+ *   - `mock` (default)  — Plan 04 fake runner, fast and offline.
+ *   - `claude`          — Plan 07 real runner driven by Anthropic's
+ *                         Claude Agent SDK. Requires
+ *                         `ANTHROPIC_API_KEY` and a `LinearClient`.
+ *
+ * Returns `null` (and logs `error`) on any startup misconfiguration so
+ * the caller can exit nonzero before we touch the orchestrator.
+ */
+function buildAgent(
+  config: ServiceConfig,
+  logger: Logger,
+  linearClient: LinearClient | null,
+): AgentRunner | null {
+  const kind = (config.agent.kind ?? 'mock').toLowerCase();
+  if (kind === 'mock') {
+    logger.info('agent ready', { kind: 'mock' });
+    return new MockAgent({
+      turnDurationMs: 800,
+      notifications: ['analyzing', 'planning', 'implementing'],
+    });
+  }
+  if (kind === 'claude') {
+    // The SDK reads ANTHROPIC_API_KEY from process.env on every call.
+    // Failing fast here (rather than discovering the missing env var
+    // mid-turn) gives operators a single, obvious startup error.
+    if (!hasNonEmptyEnv('ANTHROPIC_API_KEY')) {
+      logger.error(
+        'agent.kind=claude requires ANTHROPIC_API_KEY in the environment (set it via your --env-file)',
+      );
+      return null;
+    }
+    if (linearClient === null) {
+      logger.error(
+        'agent.kind=claude requires tracker.api_key — the Linear graphql tool reuses the tracker client',
+      );
+      return null;
+    }
+    logger.info('agent ready', { kind: 'claude', model: config.agent.model });
+    return new ClaudeAgent({
+      linearClient,
+      skillMarkdown: LINEAR_SKILL_MARKDOWN,
+      logger,
+      model: config.agent.model,
+    });
+  }
+  logger.error('unsupported agent.kind', { kind });
+  return null;
+}
+
+function hasNonEmptyEnv(name: string): boolean {
+  const value = env[name];
+  return typeof value === 'string' && value.length > 0;
 }
 
 async function buildFakeTracker(config: ServiceConfig, logger: Logger): Promise<Tracker | null> {

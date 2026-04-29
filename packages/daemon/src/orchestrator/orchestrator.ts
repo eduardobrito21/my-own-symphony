@@ -364,6 +364,16 @@ export class Orchestrator {
         return;
       }
 
+      // Track terminal events emitted by the agent. SPEC contract:
+      // exactly one terminal event per run (`turn_completed` or
+      // `turn_failed`). We treat a `turn_failed` as an abnormal exit
+      // even if the iterable completes normally — otherwise an agent
+      // that yields `turn_failed` and returns gets the same retry
+      // treatment as a clean success, which produces a tight retry
+      // loop on persistent failures (Bug 1, Plan 07 smoke run
+      // 2026-04-29).
+      let lastTerminal: 'turn_completed' | 'turn_failed' | null = null;
+      let turnFailedReason: string | null = null;
       try {
         const events = this.agent.run({
           issueId: issue.id,
@@ -375,11 +385,22 @@ export class Orchestrator {
         });
         for await (const event of events) {
           await this.applyAgentEvent(issue.id, event, log);
+          if (event.kind === 'turn_completed') {
+            lastTerminal = 'turn_completed';
+          } else if (event.kind === 'turn_failed') {
+            lastTerminal = 'turn_failed';
+            turnFailedReason = event.reason;
+          }
         }
       } catch (cause) {
         exitReason = 'abnormal';
         exitError = stringifyCause(cause);
         log.error('agent run threw', { cause });
+      }
+
+      if (exitReason === 'normal' && lastTerminal === 'turn_failed') {
+        exitReason = 'abnormal';
+        exitError = `turn_failed: ${turnFailedReason ?? 'unknown'}`;
       }
 
       await this.workspaceManager.finalizeAfterRun(workspace);
@@ -397,10 +418,33 @@ export class Orchestrator {
       const entry = this.state.running.get(id);
       if (entry === undefined) return;
       updateLiveSession(entry, event);
+      // Per-turn usage events fold into the daemon-wide totals here,
+      // inside the lock, so concurrent agents can't race on the
+      // accumulator. Plan 07 / SDK reports per-turn (NOT cumulative)
+      // numbers, so we add directly without diffing — see decision
+      // log entry "Per-turn token semantics".
+      if (event.kind === 'usage') {
+        this.state.agentTotals.inputTokens += event.inputTokens;
+        this.state.agentTotals.outputTokens += event.outputTokens;
+        this.state.agentTotals.totalTokens += event.inputTokens + event.outputTokens;
+      }
       log.info('agent_event', {
         kind: event.kind,
         ...(event.kind === 'session_started' && { session_id: event.sessionId }),
         ...(event.kind === 'notification' && { message: event.message }),
+        ...(event.kind === 'tool_call' && {
+          tool_name: event.toolName,
+          call_id: event.callId,
+        }),
+        ...(event.kind === 'tool_result' && {
+          call_id: event.callId,
+          is_error: event.isError,
+        }),
+        ...(event.kind === 'usage' && {
+          input_tokens: event.inputTokens,
+          output_tokens: event.outputTokens,
+          total_cost_usd: event.totalCostUsd,
+        }),
         ...(event.kind === 'turn_failed' && { reason: event.reason }),
       });
     });
@@ -632,6 +676,28 @@ function updateLiveSession(entry: MutableRunningEntry, event: AgentEvent): void 
       break;
     case 'notification':
       session.lastAgentMessage = event.message;
+      break;
+    case 'tool_call':
+      // Surface the tool name as the latest "what is the agent
+      // doing right now" string. The dashboard reads this to
+      // distinguish "thinking" from "calling Linear".
+      session.lastAgentMessage = `calling ${event.toolName}`;
+      break;
+    case 'tool_result':
+      session.lastAgentMessage = event.isError
+        ? `tool error (call ${event.callId})`
+        : `tool returned (call ${event.callId})`;
+      break;
+    case 'usage':
+      // Per-turn usage from the SDK. Add to the live session's
+      // running totals so a snapshot reflects the cost of work in
+      // flight. Daemon-wide accumulation happens in
+      // `applyAgentEvent`. The `lastReported*` fields stay zero —
+      // we don't need diff math here because the SDK reports
+      // per-turn rather than cumulative-since-thread-start.
+      session.tokens.inputTokens += event.inputTokens;
+      session.tokens.outputTokens += event.outputTokens;
+      session.tokens.totalTokens += event.inputTokens + event.outputTokens;
       break;
     case 'turn_completed':
       session.turnCount = event.turnNumber;

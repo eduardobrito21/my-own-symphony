@@ -1,0 +1,23 @@
+{
+  // Standalone tsconfig for ad-hoc Node helper scripts under `scripts/`.
+  //
+  // These scripts run directly with `node --env-file=.env <path>` and
+  // are not part of any package's build graph. They get their own
+  // tsconfig so the ESLint type-aware project service can find them
+  // — without that, lint refuses to parse them with the message
+  // "was not found by the project service" (see `eslint.config.mjs`
+  // root parserOptions.projectService).
+  //
+  // No `outDir` / `composite` here — these are .mjs files we run as-is;
+  // the only point is to declare scope for tools that walk the project.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    // Override base settings that don't apply to plain .mjs scripts.
+    "verbatimModuleSyntax": false,
+    "isolatedModules": false
+  },
+  "include": ["**/*.mjs", "**/*.js"]
+}

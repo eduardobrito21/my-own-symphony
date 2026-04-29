@@ -40,13 +40,20 @@ export interface AgentRunInput {
 
 /**
  * Events emitted during a run. Discriminated on `kind` for exhaustive
- * switch handling. The list is intentionally small for Plan 04 — the
- * Claude SDK adapter (Plan 07) will produce a richer set including
- * tool calls, token usage, rate limits, etc.
+ * switch handling. The list grew with Plan 07 to cover Claude Agent
+ * SDK semantics: tool invocations and per-turn token usage.
+ *
+ * Backward-compatibility contract: this union is **additive only**.
+ * Existing consumers that handle the four original kinds continue to
+ * work — they will simply ignore any new event kinds. Code that wants
+ * to react to the new kinds must opt in by adding cases.
  */
 export type AgentEvent =
   | SessionStartedEvent
   | NotificationEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | UsageEvent
   | TurnCompletedEvent
   | TurnFailedEvent;
 
@@ -79,6 +86,76 @@ export interface TurnCompletedEvent {
 export interface TurnFailedEvent {
   readonly kind: 'turn_failed';
   readonly reason: string;
+  readonly at: Date;
+}
+
+/**
+ * The agent invoked a tool. Plan 07 introduces this event to surface
+ * activity that's invisible to plain `notification` events — namely
+ * the agent's `linear_graphql` calls and any future custom tools.
+ *
+ * `callId` is a correlation key for matching this call to its
+ * `tool_result`. The Claude Agent SDK supplies a stable id; for
+ * other backends we may synthesize one (e.g. monotonic counter).
+ *
+ * `input` is the *structured* tool input as a JS value, NOT a
+ * stringified JSON. Consumers that want to log it should stringify
+ * themselves and apply their own truncation.
+ */
+export interface ToolCallEvent {
+  readonly kind: 'tool_call';
+  readonly callId: string;
+  /**
+   * Tool name as the agent invoked it. For SDK MCP tools this looks
+   * like `mcp__<server>__<tool>`; for built-ins it is just the bare
+   * name (e.g. `Read`).
+   */
+  readonly toolName: string;
+  readonly input: unknown;
+  readonly at: Date;
+}
+
+/**
+ * A tool returned. Pairs with a prior `tool_call` via `callId`.
+ *
+ * `content` is a flat string. Tools may return rich content blocks
+ * (text + image + resource); we collapse to text-only and let the
+ * agent runner decide truncation. Truncation is applied to keep
+ * orchestrator state bounded — heavy payloads are still available
+ * to the agent itself, just not in the orchestrator's snapshot.
+ */
+export interface ToolResultEvent {
+  readonly kind: 'tool_result';
+  readonly callId: string;
+  /** True if the tool reported an error. SDK contract: `isError` flag. */
+  readonly isError: boolean;
+  readonly content: string;
+  readonly at: Date;
+}
+
+/**
+ * Token usage and cost from a single turn. Plan 07 emits this
+ * **once per turn**, immediately before the terminal
+ * `turn_completed` / `turn_failed` event, because the Claude Agent
+ * SDK only reports usage at the end of a `query()` call.
+ *
+ * Per-turn semantics (NOT cumulative across resumed sessions):
+ * `inputTokens` / `outputTokens` reflect only the tokens consumed
+ * by this specific turn. The orchestrator accumulates them into
+ * `agentTotals` directly — no diff math needed.
+ *
+ * Cache fields are `null` when the model didn't report cache
+ * activity. `totalCostUsd` is `null` when the SDK doesn't surface
+ * a cost figure (e.g. when running through a non-Anthropic
+ * provider or when the host doesn't have billing visibility).
+ */
+export interface UsageEvent {
+  readonly kind: 'usage';
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheCreationInputTokens: number | null;
+  readonly cacheReadInputTokens: number | null;
+  readonly totalCostUsd: number | null;
   readonly at: Date;
 }
 

@@ -21,8 +21,8 @@ out of `packages/daemon/src/tracker/linear/`.
 
 1. **Schema-drift bugs hide from unit tests.** Our
    `inverseRelations(filter: { type: { eq: "blocks" } })` query
-   passed every unit test because the tests mocked the *response*
-   shape we expected — but Linear's schema rejects the *request*
+   passed every unit test because the tests mocked the _response_
+   shape we expected — but Linear's schema rejects the _request_
    shape, returning 400. Live smoke caught it on the first poll.
    Reinforces the harness-engineering case for real-API smoke
    scripts even when typed schemas + zod validation make you feel
@@ -186,20 +186,20 @@ to real with no code change anywhere outside `tracker/`.
   alongside automated tests.
 - **2026-04-29** — **Live smoke against project `c58e6fc4ca75`
   succeeded** with MockAgent. End-to-end flow proven:
-    1. workflow loaded with `tracker.kind=linear`
-    2. env loading via `node --env-file=.env`
-    3. Linear tracker connects (no `linear_api_status`)
-    4. startup terminal cleanup ran ("no terminal issues to sweep")
-    5. real polling at 5s interval — `tick start` / `tick end
-       candidates=N dispatched=N`
-    6. real issue `EDU-5` (uuid `d9f36fd3-…`) fetched, paginated,
-       zod-validated, normalized
-    7. workspace created at `/tmp/symphony-linear-test-workspaces/EDU-5/`
-    8. `after_create` hook fired
-    9. MockAgent ran 4 turns with full event stream
-   10. retry queue cycled correctly (`retry_fired` →
-       `retry_released_claim` because already claimed)
-   11. SIGINT → clean shutdown with `completed_count=1`
+  1. workflow loaded with `tracker.kind=linear`
+  2. env loading via `node --env-file=.env`
+  3. Linear tracker connects (no `linear_api_status`)
+  4. startup terminal cleanup ran ("no terminal issues to sweep")
+  5. real polling at 5s interval — `tick start` / `tick end
+candidates=N dispatched=N`
+  6. real issue `EDU-5` (uuid `d9f36fd3-…`) fetched, paginated,
+     zod-validated, normalized
+  7. workspace created at `/tmp/symphony-linear-test-workspaces/EDU-5/`
+  8. `after_create` hook fired
+  9. MockAgent ran 4 turns with full event stream
+  10. retry queue cycled correctly (`retry_fired` →
+      `retry_released_claim` because already claimed)
+  11. SIGINT → clean shutdown with `completed_count=1`
 - **2026-04-29** — **Write-back-to-Linear via bash hooks**
   (instead of the agent's `linear_graphql` tool, which arrives
   in Plan 07). Used the `after_create` hook to post a real

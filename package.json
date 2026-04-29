@@ -10,7 +10,7 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc --build && pnpm -r --workspace-concurrency=1 run --if-present postbuild",
     "clean": "tsc --build --clean && rm -rf packages/*/dist",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint . --fix && prettier --write .",
