@@ -25,6 +25,7 @@ import { formatWorkflowError } from './config/errors.js';
 import { loadWorkflow } from './config/loader.js';
 import type { ServiceConfig } from './config/schema.js';
 import { WorkflowWatcher } from './config/watch.js';
+import { startHttpServer, type RunningHttpServer } from './http/server.js';
 import { createConsoleLogger, type Logger } from './observability/index.js';
 import { Orchestrator } from './orchestrator/index.js';
 import { startupTerminalCleanup } from './orchestrator/startup.js';
@@ -117,13 +118,22 @@ async function main(): Promise<number> {
   });
   logger.info('watching workflow for changes', { workflow_path: workflowPath });
 
+  // ---- Optional HTTP server (Plan 08a) ----
+  // Off by default. Set SYMPHONY_HTTP_PORT in your env (e.g. in `.env`)
+  // to expose the read-only state endpoint for the dashboard or curl.
+  // Deliberately not in WORKFLOW.md — port + host are deployment
+  // decisions, not workflow decisions.
+  const httpServer = await maybeStartHttpServer(orchestrator, logger);
+
   // ---- Signal handling ----
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info('signal received', { signal });
-    void Promise.allSettled([orchestrator.stop(), watcher.close()]).then(() => {
+    const settled = [orchestrator.stop(), watcher.close()];
+    if (httpServer !== null) settled.push(httpServer.close());
+    void Promise.allSettled(settled).then(() => {
       logger.info('clean shutdown complete');
       // Use a small delay so the final log line flushes before
       // process.exit short-circuits stderr buffering.
@@ -293,6 +303,53 @@ function buildAgent(
   }
   logger.error('unsupported agent.kind', { kind });
   return null;
+}
+
+/**
+ * Start the optional Plan 08a HTTP server if the operator opted in
+ * via env. Configuration lives in env vars rather than WORKFLOW.md
+ * because port + host are **deployment** decisions (where this
+ * particular daemon listens), not **workflow** decisions (how the
+ * agent should behave on a Linear issue). Mixing the two would
+ * make WORKFLOW.md non-portable — the same workflow file can't be
+ * re-run on a different daemon instance if it hard-codes a port.
+ *
+ *   SYMPHONY_HTTP_PORT=3000   # required to enable; unset = off
+ *   SYMPHONY_HTTP_HOST=127.0.0.1   # optional; defaults to loopback
+ *
+ * Returns null when not enabled, so the daemon stays silent on
+ * the network until an operator explicitly asks for the API.
+ */
+async function maybeStartHttpServer(
+  orchestrator: Orchestrator,
+  logger: Logger,
+): Promise<RunningHttpServer | null> {
+  const portRaw = env['SYMPHONY_HTTP_PORT'];
+  if (portRaw === undefined || portRaw.trim() === '') return null;
+  const port = Number.parseInt(portRaw, 10);
+  if (!Number.isFinite(port) || port < 0 || port > 65_535) {
+    logger.error('SYMPHONY_HTTP_PORT is not a valid port; HTTP server disabled', {
+      value: portRaw,
+    });
+    return null;
+  }
+  const host = env['SYMPHONY_HTTP_HOST'] ?? '127.0.0.1';
+  try {
+    return await startHttpServer({
+      port,
+      host,
+      getSnapshot: () => orchestrator.snapshot(),
+      daemonStartedAt: new Date(),
+      logger,
+    });
+  } catch (cause) {
+    logger.error('failed to start HTTP server; continuing without it', {
+      port,
+      host,
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+    return null;
+  }
 }
 
 function hasNonEmptyEnv(name: string): boolean {

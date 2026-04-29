@@ -9,3 +9,5 @@ coverage/
 *.log
 .vitest-cache/
 .eslintcache
+
+.next/

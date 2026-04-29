@@ -9,6 +9,9 @@ export default tseslint.config(
     // rules below cannot be applied to them.
     ignores: [
       '**/dist/**',
+      // Next.js build output (packages/dashboard/.next/). Treat the
+      // same way we treat dist/ — generated, never edited by hand.
+      '**/.next/**',
       '**/node_modules/**',
       '**/*.tsbuildinfo',
       'coverage/**',
@@ -17,6 +20,9 @@ export default tseslint.config(
       '*.cjs',
       '*.mjs',
       '*.js',
+      // Next.js config lives one level deep but is the same kind of
+      // config file as the root-level `*.mjs` entries above.
+      'packages/dashboard/next.config.mjs',
       'vitest.config.ts',
       '.dependency-cruiser.cjs',
       // Helper scripts under `scripts/` get a dedicated, looser

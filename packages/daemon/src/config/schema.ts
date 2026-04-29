@@ -239,6 +239,12 @@ export function buildServiceConfigSchema(baseDir: string) {
 
   // ---- top-level -----------------------------------------------------
 
+  // Note: HTTP server settings (port, host) are deliberately NOT in
+  // this schema. They are **deployment** concerns, configured via
+  // env (`SYMPHONY_HTTP_PORT`, `SYMPHONY_HTTP_HOST`) so the same
+  // WORKFLOW.md is portable across daemon instances. See the
+  // composition root (`maybeStartHttpServer` in `index.ts`).
+
   return (
     z
       .object({
@@ -249,9 +255,8 @@ export function buildServiceConfigSchema(baseDir: string) {
         agent: AgentConfigSchema,
       })
       // Allow unknown top-level keys for forward compatibility with
-      // extensions (e.g. `server.*` from Plan 08) and for compatibility
-      // with upstream-Symphony WORKFLOW.md files that include `codex.*`.
-      // See header comment on this file.
+      // future extensions and for compatibility with upstream-Symphony
+      // WORKFLOW.md files that include `codex.*`. See header comment.
       .passthrough()
   );
 }

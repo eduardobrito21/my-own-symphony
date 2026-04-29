@@ -18,7 +18,9 @@
     "test:watch": "vitest --passWithNoTests",
     "deps:check": "depcruise --config .dependency-cruiser.cjs packages",
     "typecheck": "tsc --build --pretty",
-    "symphony": "node --env-file=.env packages/daemon/dist/index.js"
+    "symphony": "node --env-file=.env packages/daemon/dist/index.js",
+    "dashboard": "pnpm --filter @symphony/dashboard dev",
+    "dashboard:build": "pnpm --filter @symphony/dashboard build"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
