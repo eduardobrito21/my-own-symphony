@@ -161,6 +161,27 @@ export function buildServiceConfigSchema(baseDir: string) {
       return result;
     });
 
+  const ThinkingConfigSchema = z.discriminatedUnion('type', [
+    z
+      .object({
+        type: z.literal('disabled'),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal('adaptive'),
+        display: z.enum(['summarized', 'omitted']).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        type: z.literal('enabled'),
+        budgetTokens: z.number().int().positive().optional(),
+        display: z.enum(['summarized', 'omitted']).optional(),
+      })
+      .strict(),
+  ]);
+
   // Per ADR 0008, the upstream spec's `codex.*` section is folded into
   // `agent.*` for this implementation. Generic timeout concepts (turn,
   // read, stall) belong on the agent regardless of backend; Codex-only
@@ -182,14 +203,27 @@ export function buildServiceConfigSchema(baseDir: string) {
       // present before instantiating ClaudeAgent.
       kind: z.string().min(1).optional(),
       // Plan 07 — model id for the `claude` backend. Default is the
-      // Sonnet 4.5 alias; override only when the user wants to pin a
-      // dated id (e.g. `claude-sonnet-4-5-20250929`). Ignored when
+      // low-cost Haiku 4.5 alias; override only when the user wants
+      // a higher-capability model or a dated id. Ignored when
       // `kind` is anything other than `claude`.
-      model: z.string().min(1).default('claude-sonnet-4-5'),
+      model: z.string().min(1).default('claude-haiku-4-5'),
+      // Claude SDK thinking/reasoning behavior. Disabled by default
+      // because this daemon's Linear workflow is mostly structured
+      // tracker I/O, where extended thinking can dominate cost.
+      thinking: ThinkingConfigSchema.default({ type: 'disabled' }),
 
       // Orchestrator-level concurrency and retry policy.
       max_concurrent_agents: z.number().int().positive().default(10),
       max_turns: z.number().int().positive().default(20),
+      // Optional Claude SDK-specific cap. This is intentionally not
+      // `max_turns`: Symphony turns are end-to-end agent calls; the
+      // SDK's `maxTurns` bounds internal model round trips inside
+      // one query call.
+      max_model_round_trips: z.number().int().positive().optional(),
+      // Optional per-query SDK budget guard. Undefined means "no
+      // SDK budget cap"; live workflows can set this low while
+      // smoke-testing against paid APIs.
+      max_budget_usd: z.number().positive().optional(),
       max_retry_backoff_ms: z.number().int().positive().default(300_000),
       max_concurrent_agents_by_state: MaxConcurrentByStateSchema,
 

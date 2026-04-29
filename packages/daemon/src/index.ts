@@ -272,12 +272,23 @@ function buildAgent(
       );
       return null;
     }
-    logger.info('agent ready', { kind: 'claude', model: config.agent.model });
+    logger.info('agent ready', {
+      kind: 'claude',
+      model: config.agent.model,
+      thinking: config.agent.thinking,
+    });
     return new ClaudeAgent({
       linearClient,
       skillMarkdown: LINEAR_SKILL_MARKDOWN,
       logger,
       model: config.agent.model,
+      thinking: config.agent.thinking,
+      ...(config.agent.max_model_round_trips !== undefined && {
+        maxModelRoundTrips: config.agent.max_model_round_trips,
+      }),
+      ...(config.agent.max_budget_usd !== undefined && {
+        maxBudgetUsd: config.agent.max_budget_usd,
+      }),
     });
   }
   logger.error('unsupported agent.kind', { kind });

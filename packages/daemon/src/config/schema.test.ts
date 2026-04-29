@@ -36,6 +36,8 @@ describe('buildServiceConfigSchema', () => {
       expect(result.hooks.timeout_ms).toBe(60_000);
       expect(result.agent.max_concurrent_agents).toBe(10);
       expect(result.agent.max_turns).toBe(20);
+      expect(result.agent.max_model_round_trips).toBeUndefined();
+      expect(result.agent.max_budget_usd).toBeUndefined();
       expect(result.agent.max_retry_backoff_ms).toBe(300_000);
       expect(result.agent.max_concurrent_agents_by_state).toEqual({});
       expect(result.agent.turn_timeout_ms).toBe(3_600_000);
@@ -43,7 +45,8 @@ describe('buildServiceConfigSchema', () => {
       expect(result.agent.stall_timeout_ms).toBe(300_000);
       // Plan 07 — agent backend selector defaults.
       expect(result.agent.kind).toBeUndefined();
-      expect(result.agent.model).toBe('claude-sonnet-4-5');
+      expect(result.agent.model).toBe('claude-haiku-4-5');
+      expect(result.agent.thinking).toEqual({ type: 'disabled' });
     });
 
     it('accepts a minimal config with just tracker.kind', () => {
@@ -161,6 +164,18 @@ describe('buildServiceConfigSchema', () => {
       expect(() => schema.parse({ agent: { max_turns: -1 } })).toThrow();
     });
 
+    it('rejects a non-positive max_model_round_trips', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      expect(() => schema.parse({ agent: { max_model_round_trips: 0 } })).toThrow();
+      expect(() => schema.parse({ agent: { max_model_round_trips: -1 } })).toThrow();
+    });
+
+    it('rejects a non-positive max_budget_usd', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      expect(() => schema.parse({ agent: { max_budget_usd: 0 } })).toThrow();
+      expect(() => schema.parse({ agent: { max_budget_usd: -1 } })).toThrow();
+    });
+
     it('rejects a non-positive polling.interval_ms', () => {
       const schema = buildServiceConfigSchema(BASE_DIR);
       expect(() => schema.parse({ polling: { interval_ms: 0 } })).toThrow();
@@ -193,7 +208,22 @@ describe('buildServiceConfigSchema', () => {
       const schema = buildServiceConfigSchema(BASE_DIR);
       const result = schema.parse({ agent: { kind: 'mock' } });
       expect(result.agent.kind).toBe('mock');
-      expect(result.agent.model).toBe('claude-sonnet-4-5');
+      expect(result.agent.model).toBe('claude-haiku-4-5');
+    });
+
+    it('accepts an explicit Claude thinking config', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      const result = schema.parse({
+        agent: {
+          kind: 'claude',
+          thinking: { type: 'enabled', budgetTokens: 1024, display: 'omitted' },
+        },
+      });
+      expect(result.agent.thinking).toEqual({
+        type: 'enabled',
+        budgetTokens: 1024,
+        display: 'omitted',
+      });
     });
 
     it('rejects an empty agent.model (typo guard)', () => {
