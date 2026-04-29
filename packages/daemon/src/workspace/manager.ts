@@ -77,13 +77,27 @@ const NOOP_LOGGER: WorkspaceLogger = {
 
 export class WorkspaceManager {
   private readonly root: string;
-  private readonly hooks: HooksConfig;
+  // Mutable so dynamic `WORKFLOW.md` reload (Plan 05) can swap hook
+  // scripts and timeout in place without recreating the manager.
+  // Reads always go through `this.hooks.<field>`; we never close
+  // over the value at method-define time.
+  private hooks: HooksConfig;
   private readonly logger: WorkspaceLogger;
 
   constructor(args: WorkspaceManagerArgs) {
     this.root = args.root;
     this.hooks = args.hooks;
     this.logger = args.logger ?? NOOP_LOGGER;
+  }
+
+  /**
+   * Replace the live hook config. Used by the orchestrator when
+   * `WORKFLOW.md` is reloaded so future runs use the new scripts /
+   * timeout. In-flight hooks already running keep their original
+   * values (we don't try to re-target a process mid-execution).
+   */
+  setHooks(hooks: HooksConfig): void {
+    this.hooks = hooks;
   }
 
   /**
