@@ -1,25 +1,16 @@
 // `Orchestrator` — the single-authority coordination class.
 //
-// Plan 04 scope (per the exec plan's "Out of scope" list):
-//   IN  poll loop, dispatch, eligibility, mock agent runs, snapshot
-//   OUT retries with backoff (Plan 05)
-//   OUT reconciliation against tracker state changes (Plan 05)
-//   OUT stall detection (Plan 05)
-//   OUT dynamic workflow reload (Plan 05)
-//
-// Lifecycle:
-//   start()  — schedules an immediate tick, returns
-//   stop()   — clears the timer, awaits in-flight workers, returns
-//   tick()   — public for testing; called internally by the scheduler
-//   snapshot() — read-only point-in-time view of state
+// Plan 04 added: poll loop, dispatch, eligibility, mock agent runs,
+//                snapshot.
+// Plan 05 adds:  retry queue with backoff, reconciliation (stall +
+//                tracker state), dynamic `WORKFLOW.md` reload.
 //
 // All state mutations are serialized through `lock.run(...)`. Workers
-// spawn asynchronously and report back through the lock — see
-// `dispatchOne()` and `runWorker()`.
+// spawn asynchronously and report back through the lock.
 
-import type { ServiceConfig } from '../config/schema.js';
 import { parsePromptTemplate, renderPrompt } from '../agent/prompt.js';
 import type { AgentEvent, AgentRunner } from '../agent/runner.js';
+import type { ServiceConfig, WorkflowDefinition } from '../config/schema.js';
 import type { Logger } from '../observability/index.js';
 import { sortForDispatch } from '../tracker/sort.js';
 import type { Tracker } from '../tracker/tracker.js';
@@ -27,13 +18,15 @@ import {
   composeSessionId,
   type Issue,
   type IssueId,
+  type IssueIdentifier,
   type OrchestratorState,
-  type SessionId,
 } from '../types/index.js';
 import type { WorkspaceManager } from '../workspace/index.js';
 
 import { evaluateRuntimeEligibility } from './eligibility.js';
 import { AsyncLock } from './lock.js';
+import { reconcile } from './reconcile.js';
+import { cancelRetry, scheduleRetry } from './retry.js';
 import {
   createInitialState,
   newRunningEntry,
@@ -51,8 +44,10 @@ export interface OrchestratorArgs {
   readonly logger: Logger;
   /** Override the timer mechanism for tests. */
   readonly schedule?: TimerSchedule;
-  /** Override the clock for deterministic tests. */
+  /** Override the wall clock for deterministic tests. */
   readonly now?: () => Date;
+  /** Override the monotonic clock used for retry due times. */
+  readonly monotonicNow?: () => number;
 }
 
 export interface TimerSchedule {
@@ -74,15 +69,24 @@ export class Orchestrator {
   private readonly workspaceManager: WorkspaceManager;
   private readonly agent: AgentRunner;
   private readonly logger: Logger;
-  private readonly config: ServiceConfig;
   private readonly schedule: TimerSchedule;
   private readonly now: () => Date;
-  private readonly parsedTemplate: ReturnType<typeof parsePromptTemplate>;
+  private readonly monotonicNow: () => number;
+
+  // Mutable so `applyWorkflow` (Plan 05 dynamic reload) can swap them.
+  private config: ServiceConfig;
+  private parsedTemplate: ReturnType<typeof parsePromptTemplate>;
 
   /** In-flight workers, keyed by issue id. Resolves when the worker exits. */
   private readonly workers = new Map<IssueId, Promise<void>>();
-  /** Per-worker abort controllers so we can cancel agent runs on shutdown. */
+  /** Per-worker abort controllers so we can cancel agent runs. */
   private readonly workerAborts = new Map<IssueId, AbortController>();
+  /**
+   * Issues whose run was canceled by reconciliation. `completeWorker`
+   * checks this set to skip retry scheduling for cancellations —
+   * only stalls and "natural" abnormal exits should trigger retries.
+   */
+  private readonly canceled = new Set<IssueId>();
 
   private tickHandle: unknown = null;
   private stopped = false;
@@ -95,6 +99,7 @@ export class Orchestrator {
     this.config = args.config;
     this.schedule = args.schedule ?? DEFAULT_SCHEDULE;
     this.now = args.now ?? (() => new Date());
+    this.monotonicNow = args.monotonicNow ?? (() => performance.now());
     this.state = createInitialState({
       pollIntervalMs: args.config.polling.interval_ms,
       maxConcurrentAgents: args.config.agent.max_concurrent_agents,
@@ -116,9 +121,9 @@ export class Orchestrator {
   }
 
   /**
-   * Forceful stop: cancel the tick timer, abort every in-flight
-   * agent, wait for every worker to settle. SIGINT / SIGTERM
-   * handlers in the composition root use this.
+   * Forceful stop: cancel timers, abort every in-flight agent, wait
+   * for every worker to settle. SIGINT/SIGTERM in the composition
+   * root use this.
    */
   async stop(): Promise<void> {
     if (this.stopped) return;
@@ -127,6 +132,10 @@ export class Orchestrator {
     if (this.tickHandle !== null) {
       this.schedule.clearTimeout(this.tickHandle);
       this.tickHandle = null;
+    }
+    // Cancel every pending retry timer so it can't fire post-stop.
+    for (const id of [...this.state.retryAttempts.keys()]) {
+      cancelRetry(this.state, id, this.schedule);
     }
     for (const ac of this.workerAborts.values()) {
       ac.abort();
@@ -138,10 +147,8 @@ export class Orchestrator {
   }
 
   /**
-   * Wait for every currently running worker to finish naturally
-   * without aborting them. Tests use this between `tick()` and
-   * assertions to let the in-flight agent complete cleanly.
-   * Does NOT cancel the tick timer.
+   * Wait for every currently running worker to finish naturally.
+   * Tests use this to assert post-tick state. Does NOT cancel timers.
    */
   async drain(): Promise<void> {
     await Promise.allSettled(this.workers.values());
@@ -156,10 +163,12 @@ export class Orchestrator {
   // ---- Tick ------------------------------------------------------------
 
   /**
-   * Public for tests. The internal scheduler calls this on each timer
-   * fire. Always returns after one full tick (dispatch decisions made,
-   * workers spawned). Workers may continue executing after `tick()`
-   * resolves.
+   * Run one full tick. Public for tests.
+   *
+   * Sequence (SPEC §8.1):
+   *   1. Reconcile running issues (stall + tracker state refresh).
+   *   2. Fetch candidate issues.
+   *   3. Sort and dispatch within concurrency limits.
    */
   async tick(): Promise<void> {
     if (this.stopped) return;
@@ -167,7 +176,30 @@ export class Orchestrator {
   }
 
   private async runTick(): Promise<void> {
-    this.logger.info('tick start', { running: this.state.running.size });
+    this.logger.info('tick start', {
+      running: this.state.running.size,
+      retrying: this.state.retryAttempts.size,
+    });
+
+    // Plan 05: reconciliation runs every tick, BEFORE dispatch (per
+    // SPEC §8.1).
+    await reconcile({
+      state: this.state,
+      tracker: this.tracker,
+      config: this.config,
+      logger: this.logger,
+      now: this.now,
+      onTerminate: (id, opts) => {
+        this.terminateRunning(id, opts);
+      },
+      onStall: (id) => {
+        // Stall: just abort. The worker's abnormal exit will go
+        // through completeWorker, which will schedule a normal
+        // failure retry. We do NOT mark as canceled here.
+        const ac = this.workerAborts.get(id);
+        ac?.abort();
+      },
+    });
 
     const fetched = await this.tracker.fetchCandidateIssues({
       activeStates: this.config.tracker.active_states,
@@ -226,13 +258,44 @@ export class Orchestrator {
     }
   }
 
-  // ---- Dispatch / worker lifecycle -------------------------------------
+  // ---- Dynamic reload --------------------------------------------------
 
   /**
-   * Launch a worker for `issue`. Adds an entry to `running` and
-   * `claimed` synchronously (we already hold the lock); spawns the
-   * actual work asynchronously.
+   * Apply a freshly-loaded `WorkflowDefinition`. Called by the file
+   * watcher (Plan 05) when `WORKFLOW.md` changes. SPEC §6.2:
+   *   - re-apply config and prompt template without restart
+   *   - apply to FUTURE dispatch decisions; in-flight runs keep
+   *     their original values
+   *   - poll interval / concurrency change is reflected on the next
+   *     tick
    */
+  async applyWorkflow(def: WorkflowDefinition): Promise<void> {
+    await this.lock.run(() => {
+      const prevPollMs = this.state.pollIntervalMs;
+      this.config = def.config;
+      this.parsedTemplate = parsePromptTemplate(def.promptTemplate);
+      this.state.pollIntervalMs = def.config.polling.interval_ms;
+      this.state.maxConcurrentAgents = def.config.agent.max_concurrent_agents;
+      this.workspaceManager.setHooks(def.config.hooks);
+
+      this.logger.info('workflow reloaded', {
+        poll_interval_ms: this.state.pollIntervalMs,
+        max_concurrent_agents: this.state.maxConcurrentAgents,
+        prompt_parsed: this.parsedTemplate.ok,
+      });
+
+      // If the poll interval changed and we have a tick scheduled,
+      // reschedule with the new interval so changes apply faster.
+      if (this.tickHandle !== null && this.state.pollIntervalMs !== prevPollMs && !this.stopped) {
+        this.schedule.clearTimeout(this.tickHandle);
+        this.tickHandle = null;
+        this.scheduleNextTick(this.state.pollIntervalMs);
+      }
+    });
+  }
+
+  // ---- Dispatch / worker lifecycle -------------------------------------
+
   private dispatchOne(issue: Issue, retryAttempt: number | null): void {
     const placeholderSessionId = composeSessionId('pending', issue.id);
     const entry = newRunningEntry({
@@ -243,6 +306,9 @@ export class Orchestrator {
     });
     this.state.running.set(issue.id, entry);
     this.state.claimed.add(issue.id);
+    // If the issue was sitting in the retry queue, we're picking it
+    // up now — drop the queued entry so it doesn't double-fire.
+    cancelRetry(this.state, issue.id, this.schedule);
 
     const ac = new AbortController();
     this.workerAborts.set(issue.id, ac);
@@ -253,9 +319,6 @@ export class Orchestrator {
     });
     issueLogger.info('dispatch', { retry_attempt: retryAttempt });
 
-    // Run the worker in the background. We capture the promise so
-    // `stop()` can await all in-flight workers; we also attach a
-    // catch so an uncaught rejection from the worker doesn't leak.
     const work = this.runWorker(issue, ac.signal, issueLogger).catch((cause: unknown) => {
       issueLogger.error('worker promise rejected (this is a bug)', { cause });
     });
@@ -265,7 +328,6 @@ export class Orchestrator {
   private async runWorker(issue: Issue, signal: AbortSignal, log: Logger): Promise<void> {
     let exitReason: 'normal' | 'abnormal' = 'normal';
     let exitError: string | null = null;
-
     const startedAt = this.now();
 
     try {
@@ -273,7 +335,9 @@ export class Orchestrator {
       if (!workspaceResult.ok) {
         exitReason = 'abnormal';
         exitError = `workspace_${workspaceResult.error.code}`;
-        log.error('workspace preparation failed', { error_code: workspaceResult.error.code });
+        log.error('workspace preparation failed', {
+          error_code: workspaceResult.error.code,
+        });
         return;
       }
       const workspace = workspaceResult.workspace;
@@ -328,10 +392,6 @@ export class Orchestrator {
     }
   }
 
-  /**
-   * Apply one agent event to the corresponding running entry. Holds
-   * the lock for the duration of the mutation.
-   */
   private async applyAgentEvent(id: IssueId, event: AgentEvent, log: Logger): Promise<void> {
     await this.lock.run(() => {
       const entry = this.state.running.get(id);
@@ -346,6 +406,13 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Worker exit handler. SPEC §16.6 dictates the retry policy:
+   *   - normal exit       -> add to `completed`, schedule continuation retry
+   *   - abnormal exit     -> schedule failure-driven retry
+   *   - canceled (us)     -> no retry; just bookkeeping
+   *   - shutdown          -> no retry; bookkeeping only
+   */
   private completeWorker(
     id: IssueId,
     durationSec: number,
@@ -359,25 +426,192 @@ export class Orchestrator {
     this.workerAborts.delete(id);
     this.state.agentTotals.secondsRunning += durationSec;
 
-    if (reason === 'normal') {
-      this.state.completed.add(id);
-      // Plan 04 leaves the issue claimed; Plan 05 will release the
-      // claim or schedule a continuation retry. For now, we drop the
-      // claim so the next tick can pick it up again if the tracker
-      // still reports it as active.
+    const wasCanceled = this.canceled.delete(id);
+
+    if (this.stopped || wasCanceled) {
+      // No retry: bookkeeping only.
       this.state.claimed.delete(id);
-    } else {
-      // Plan 05 will schedule a backoff retry here. For Plan 04 we
-      // simply drop the claim so the next tick can re-dispatch (and
-      // we log the failure so it's visible).
-      this.state.claimed.delete(id);
+      log.info('worker_exit', {
+        reason,
+        duration_sec: durationSec.toFixed(3),
+        retried: false,
+        canceled: wasCanceled,
+        ...(error !== null && { error }),
+        ...(entry !== undefined && { session_id: entry.session.sessionId }),
+      });
+      return;
     }
 
-    log.info('worker_exit', {
-      reason,
-      duration_sec: durationSec.toFixed(3),
-      ...(error !== null && { error }),
-      ...(entry !== undefined && { session_id: entry.session.sessionId }),
+    const identifier = entry?.issue.identifier ?? ('unknown' as IssueIdentifier);
+    if (reason === 'normal') {
+      this.state.completed.add(id);
+      const delayMs = scheduleRetry({
+        state: this.state,
+        issueId: id,
+        identifier,
+        attempt: 1,
+        delayKind: 'continuation',
+        maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
+        schedule: this.schedule,
+        onFire: (retryId) => {
+          void this.handleRetryFire(retryId);
+        },
+        monotonicNow: this.monotonicNow,
+      });
+      log.info('worker_exit', {
+        reason,
+        duration_sec: durationSec.toFixed(3),
+        retried: true,
+        retry_kind: 'continuation',
+        retry_delay_ms: delayMs,
+        ...(entry !== undefined && { session_id: entry.session.sessionId }),
+      });
+    } else {
+      // Failure-driven retry. The first attempt is 1 (so backoff
+      // starts at 10s). If we're already in the retry queue from a
+      // previous failure, increment off that.
+      const prevAttempt = entry?.retryAttempt ?? 0;
+      const nextAttempt = prevAttempt + 1;
+      const delayMs = scheduleRetry({
+        state: this.state,
+        issueId: id,
+        identifier,
+        attempt: nextAttempt,
+        delayKind: 'failure',
+        maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
+        schedule: this.schedule,
+        onFire: (retryId) => {
+          void this.handleRetryFire(retryId);
+        },
+        // Only set `error` when present — exactOptionalPropertyTypes
+        // forbids passing `undefined` to an optional field.
+        ...(error !== null && { error }),
+        monotonicNow: this.monotonicNow,
+      });
+      log.info('worker_exit', {
+        reason,
+        duration_sec: durationSec.toFixed(3),
+        retried: true,
+        retry_kind: 'failure',
+        retry_attempt: nextAttempt,
+        retry_delay_ms: delayMs,
+        ...(error !== null && { error }),
+        ...(entry !== undefined && { session_id: entry.session.sessionId }),
+      });
+    }
+  }
+
+  /**
+   * Reconciliation-driven termination. Aborts the worker; sets the
+   * `canceled` flag so `completeWorker` skips retry scheduling.
+   * If `cleanupWorkspace` is true, schedules workspace removal
+   * (fire-and-forget).
+   */
+  private terminateRunning(id: IssueId, opts: { readonly cleanupWorkspace: boolean }): void {
+    const entry = this.state.running.get(id);
+    if (entry === undefined) return;
+    this.canceled.add(id);
+    const ac = this.workerAborts.get(id);
+    ac?.abort();
+    cancelRetry(this.state, id, this.schedule);
+    if (opts.cleanupWorkspace) {
+      const identifier = entry.issue.identifier;
+      void this.workspaceManager.removeForTerminal(identifier);
+    }
+    // We do not remove from `running` here — `completeWorker` does
+    // that in its `finally` after the worker promise settles. The
+    // canceled flag ensures no retry is scheduled at that point.
+  }
+
+  // ---- Retry timer firing ----------------------------------------------
+
+  /**
+   * Called when a retry timer fires. Implements SPEC §16.6
+   * onRetryTimer: drop the retry entry; re-fetch candidates; if
+   * the issue still exists and is dispatch-eligible, dispatch; if
+   * no slots, requeue with attempt + 1; else release the claim.
+   */
+  private async handleRetryFire(id: IssueId): Promise<void> {
+    if (this.stopped) return;
+    await this.lock.run(async () => {
+      const entry = this.state.retryAttempts.get(id);
+      if (entry === undefined) return;
+      this.state.retryAttempts.delete(id);
+
+      const log = this.logger.with({
+        issue_id: id,
+        issue_identifier: entry.identifier,
+      });
+      log.info('retry_fired', { attempt: entry.attempt });
+
+      const candidates = await this.tracker.fetchCandidateIssues({
+        activeStates: this.config.tracker.active_states,
+      });
+      if (!candidates.ok) {
+        const delayMs = scheduleRetry({
+          state: this.state,
+          issueId: id,
+          identifier: entry.identifier,
+          attempt: entry.attempt + 1,
+          delayKind: 'failure',
+          maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
+          schedule: this.schedule,
+          onFire: (retryId) => {
+            void this.handleRetryFire(retryId);
+          },
+          error: 'retry poll failed',
+          monotonicNow: this.monotonicNow,
+        });
+        log.warn('retry_requeued', {
+          reason: 'tracker_fetch_failed',
+          attempt: entry.attempt + 1,
+          delay_ms: delayMs,
+        });
+        return;
+      }
+
+      const issue = candidates.value.find((i) => i.id === id);
+      if (issue === undefined) {
+        this.state.claimed.delete(id);
+        log.info('retry_released_claim', { reason: 'not_in_active_states' });
+        return;
+      }
+
+      const eligibility = evaluateRuntimeEligibility(issue, {
+        state: this.state,
+        tracker: this.config.tracker,
+        agent: this.config.agent,
+      });
+      if (eligibility.eligible) {
+        this.dispatchOne(issue, entry.attempt);
+        return;
+      }
+
+      if (eligibility.reason === 'no_global_slot' || eligibility.reason === 'no_per_state_slot') {
+        const delayMs = scheduleRetry({
+          state: this.state,
+          issueId: id,
+          identifier: issue.identifier,
+          attempt: entry.attempt + 1,
+          delayKind: 'failure',
+          maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
+          schedule: this.schedule,
+          onFire: (retryId) => {
+            void this.handleRetryFire(retryId);
+          },
+          error: 'no available orchestrator slots',
+          monotonicNow: this.monotonicNow,
+        });
+        log.info('retry_requeued', {
+          reason: eligibility.reason,
+          attempt: entry.attempt + 1,
+          delay_ms: delayMs,
+        });
+        return;
+      }
+
+      this.state.claimed.delete(id);
+      log.info('retry_released_claim', { reason: eligibility.reason });
     });
   }
 }
@@ -413,5 +647,3 @@ function stringifyCause(cause: unknown): string {
   if (typeof cause === 'string') return cause;
   return String(cause);
 }
-
-export type { MutableOrchestratorState, SessionId };

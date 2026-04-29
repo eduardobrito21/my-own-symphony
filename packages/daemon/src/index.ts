@@ -1,11 +1,13 @@
 // Symphony daemon entry point — composition root.
 //
 // Loads `WORKFLOW.md`, constructs every collaborator, wires the
-// orchestrator, and starts the polling loop. SIGINT and SIGTERM
-// trigger a graceful shutdown.
+// orchestrator, performs SPEC §8.6 startup terminal-workspace
+// cleanup, installs a `WORKFLOW.md` watcher for dynamic reload
+// (SPEC §6.2), and starts the polling loop. SIGINT/SIGTERM trigger
+// a graceful shutdown.
 //
-// Plan 04 scope: fake tracker + mock agent only. Real Linear arrives
-// in Plan 06; real Claude in Plan 07.
+// Plan 05 scope: real reconciliation + retries + reload. Linear
+// arrives in Plan 06; real Claude in Plan 07.
 //
 // Usage:
 //   symphony [path/to/WORKFLOW.md]
@@ -18,9 +20,11 @@ import { argv, exit, stderr, stdout } from 'node:process';
 import { formatWorkflowError } from './config/errors.js';
 import { loadWorkflow } from './config/loader.js';
 import type { ServiceConfig } from './config/schema.js';
+import { WorkflowWatcher } from './config/watch.js';
 import { MockAgent } from './agent/mock/index.js';
 import { createConsoleLogger, type Logger } from './observability/index.js';
 import { Orchestrator } from './orchestrator/index.js';
+import { startupTerminalCleanup } from './orchestrator/startup.js';
 import { FakeTracker, loadFixture } from './tracker/fake/index.js';
 import type { Tracker } from './tracker/tracker.js';
 import { WorkspaceManager } from './workspace/index.js';
@@ -78,13 +82,38 @@ async function main(): Promise<number> {
     logger,
   });
 
+  // ---- Startup terminal-workspace cleanup (SPEC §8.6) ----
+  // Runs once before the first tick. Prevents stale workspaces from
+  // accumulating across restarts.
+  await startupTerminalCleanup({
+    tracker,
+    workspaceManager,
+    config,
+    logger,
+  });
+
+  // ---- Workflow file watcher (SPEC §6.2 dynamic reload) ----
+  const watcher = new WorkflowWatcher({
+    path: workflowPath,
+    onReload: async (def) => {
+      await orchestrator.applyWorkflow(def);
+    },
+    onError: (err) => {
+      logger.error('workflow reload failed; keeping last-known-good config', {
+        code: err.code,
+        message: err.message,
+      });
+    },
+  });
+  logger.info('watching workflow for changes', { workflow_path: workflowPath });
+
   // ---- Signal handling ----
   let shuttingDown = false;
   const shutdown = (signal: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info('signal received', { signal });
-    void orchestrator.stop().then(() => {
+    void Promise.allSettled([orchestrator.stop(), watcher.close()]).then(() => {
       logger.info('clean shutdown complete');
       // Use a small delay so the final log line flushes before
       // process.exit short-circuits stderr buffering.

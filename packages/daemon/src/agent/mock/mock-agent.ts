@@ -124,6 +124,15 @@ export class MockAgent implements AgentRunner {
           // Wait until aborted. We don't yield anything else; the
           // orchestrator's stall detection (Plan 05) is responsible
           // for killing us via signal.
+          //
+          // Important: check `signal.aborted` *before* registering
+          // the listener. If abort fired between our session_started
+          // yield and entering this branch, the listener-only
+          // approach would never fire (event already happened) and
+          // we'd hang indefinitely.
+          if (input.signal?.aborted === true) {
+            throw new Error('aborted');
+          }
           await new Promise<void>((_resolve, reject) => {
             input.signal?.addEventListener(
               'abort',
