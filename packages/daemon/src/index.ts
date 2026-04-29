@@ -26,6 +26,7 @@ import { createConsoleLogger, type Logger } from './observability/index.js';
 import { Orchestrator } from './orchestrator/index.js';
 import { startupTerminalCleanup } from './orchestrator/startup.js';
 import { FakeTracker, loadFixture } from './tracker/fake/index.js';
+import { LinearClient, LinearTracker } from './tracker/linear/index.js';
 import type { Tracker } from './tracker/tracker.js';
 import { WorkspaceManager } from './workspace/index.js';
 
@@ -147,18 +148,46 @@ async function buildTracker(
 ): Promise<Tracker | null> {
   const kind = (config.tracker.kind ?? 'fake').toLowerCase();
   if (kind === 'linear') {
-    // Plan 06 will provide LinearTracker. Until then, fail with a
-    // clear message.
-    logger.error('tracker.kind=linear not yet implemented (arriving in Plan 06)', {
-      workflow_path: workflowPath,
-    });
-    return null;
+    return buildLinearTracker(config, workflowPath, logger);
   }
   if (kind === 'fake') {
     return await buildFakeTracker(config, logger);
   }
   logger.error('unsupported tracker.kind', { kind });
   return null;
+}
+
+function buildLinearTracker(
+  config: ServiceConfig,
+  workflowPath: string,
+  logger: Logger,
+): Tracker | null {
+  // SPEC §6.3 dispatch preflight checks. We do them here too so a
+  // missing project_slug or api_key fails before we wire the
+  // orchestrator at all.
+  const apiKey = config.tracker.api_key;
+  if (apiKey === undefined) {
+    logger.error('tracker.kind=linear requires tracker.api_key (use $LINEAR_API_KEY)', {
+      workflow_path: workflowPath,
+    });
+    return null;
+  }
+  const projectSlug = config.tracker.project_slug;
+  if (projectSlug === undefined) {
+    logger.error('tracker.kind=linear requires tracker.project_slug', {
+      workflow_path: workflowPath,
+    });
+    return null;
+  }
+  const client = new LinearClient({
+    endpoint: config.tracker.endpoint,
+    apiKey,
+  });
+  logger.info('linear tracker ready', {
+    endpoint: config.tracker.endpoint,
+    project_slug: projectSlug,
+  });
+  return new LinearTracker({ client, projectSlug });
 }
 
 async function buildFakeTracker(config: ServiceConfig, logger: Logger): Promise<Tracker | null> {
