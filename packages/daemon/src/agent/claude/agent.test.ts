@@ -146,7 +146,7 @@ describe('ClaudeAgent — basic flow', () => {
     const raw = await readFile(path, 'utf8');
     const record = JSON.parse(raw) as { sessionId: string; model: string };
     expect(record.sessionId).toBe('sess-A');
-    expect(record.model).toBe('claude-sonnet-4-5');
+    expect(record.model).toBe('claude-haiku-4-5');
   });
 
   it('uses resume option when a session.json exists', async () => {
@@ -440,6 +440,33 @@ describe('ClaudeAgent — basic flow', () => {
     expect(observedOptions?.systemPrompt).toBe(SKILL);
   });
 
+  it('passes cost and turn controls to the SDK', async () => {
+    let observedOptions: Record<string, unknown> | undefined;
+    const agent = new ClaudeAgent({
+      linearClient: dummyClient(),
+      skillMarkdown: SKILL,
+      logger: NULL_LOGGER,
+      thinking: { type: 'disabled' },
+      maxModelRoundTrips: 3,
+      maxBudgetUsd: 0.02,
+      queryFn: makeStubQuery({
+        messages: SUCCESS_TURN,
+        onCalled: (params) => {
+          observedOptions = params.options;
+        },
+      }),
+      now: () => new Date('2026-04-29T10:00:00Z'),
+    });
+
+    for await (const _ of agent.run(makeInput(workspace))) {
+      /* drain */
+    }
+
+    expect(observedOptions?.['thinking']).toEqual({ type: 'disabled' });
+    expect(observedOptions?.['maxTurns']).toBe(3);
+    expect(observedOptions?.['maxBudgetUsd']).toBe(0.02);
+  });
+
   it('does NOT pass persistSession: false (Bug 3 — would break SDK resume)', async () => {
     // Smoke run #2 (2026-04-29) showed every retry-with-resume
     // failing with "No conversation found with session ID: …"
@@ -473,7 +500,11 @@ describe('ClaudeAgent — basic flow', () => {
 
   it('registers the linear MCP server and allows the qualified tool name', async () => {
     let observedOptions:
-      | { mcpServers?: Record<string, unknown>; allowedTools?: readonly string[] }
+      | {
+          mcpServers?: Record<string, unknown>;
+          allowedTools?: readonly string[];
+          tools?: unknown;
+        }
       | undefined;
     const agent = new ClaudeAgent({
       linearClient: dummyClient(),
@@ -492,6 +523,7 @@ describe('ClaudeAgent — basic flow', () => {
       /* drain */
     }
     expect(Object.keys(observedOptions?.mcpServers ?? {})).toContain('linear');
+    expect(observedOptions?.tools).toEqual([]);
     expect(observedOptions?.allowedTools).toContain('mcp__linear__linear_graphql');
   });
 });

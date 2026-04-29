@@ -7,6 +7,11 @@ asynchronously.
 
 ## How you talk to Linear
 
+**`mcp__linear__linear_graphql` is already loaded and ready to call.
+Do not call `ToolSearch` — you already know all available tools from
+this system prompt.** Calling `ToolSearch` inflates every subsequent
+API call's context with the full tool registry, wasting tokens.
+
 You have one tool for Linear: **`mcp__linear__linear_graphql`**. It
 takes an arbitrary GraphQL query/mutation and the variables, executed
 against the Linear API at `https://api.linear.app/graphql` under the

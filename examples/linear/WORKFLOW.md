@@ -5,16 +5,15 @@
 # IMPORTANT — running this against the live Anthropic API spends real
 # money and writes real comments to a real Linear issue. The defaults
 # below are tuned for ONE controlled smoke run:
-#   - polling slow enough that you can hit Ctrl-C between turns
-#   - max_turns: 1 so the agent runs at most one turn per dispatch
-#   - active_states: [Todo] only, so an issue exits eligibility as
-#     soon as the agent transitions it to "In Progress"
+#   - polling slow enough that you can hit Ctrl-C between daemon turns
+#   - max_turns: 1 so the daemon runs one end-to-end agent turn per dispatch
+#   - active_states includes "In Progress" so the agent's own first
+#     transition does not cancel the in-flight worker
 #   - max_concurrent_agents: 1 so concurrent issues queue rather than
 #     fan out
 #
 # When you want to iterate freely (e.g. against a fake tracker fixture
-# in dev), bump `polling.interval_ms` back down and add "In Progress"
-# back to active_states.
+# in dev), bump `polling.interval_ms` back down.
 
 tracker:
   kind: linear
@@ -45,19 +44,21 @@ workspace:
   root: /tmp/symphony-linear-test-workspaces
 
 agent:
-  # Plan 07: drive a real Claude Sonnet 4.5 turn. The SDK reads
-  # ANTHROPIC_API_KEY from your --env-file automatically — there is
-  # no `agent.api_key` field. The `linear_graphql` tool reuses the
-  # same Linear client as the tracker above, so a single
-  # LINEAR_API_KEY covers both reads and writes.
-  #
   # To go back to the offline mock for development, switch to:
   #   kind: mock
   kind: claude
-  model: claude-sonnet-4-5
+
+  # Haiku is the safe default for low-cost tracker automation.
+  model: claude-haiku-4-5
+
+  # Extended thinking can dominate cost for simple Linear tasks.
+  thinking:
+    type: disabled
 
   max_concurrent_agents: 1
+  # Symphony turn limit: one complete agent run, not one Linear tool call.
   max_turns: 1
+  max_budget_usd: 1
   # 2 minutes — plenty of headroom for one Claude turn that may make
   # 2-3 linear_graphql round trips. The Plan 06 value (5000) was
   # MockAgent-tier and would expire mid-turn for real Claude.
@@ -71,45 +72,6 @@ agent:
 
 hooks:
   timeout_ms: 10000
-  # Plan 06 left an `after_create` hook here that posts its own
-  # "Symphony picked up this issue" comment. For the Plan 07 Claude
-  # smoke we want the agent itself to be the only thing posting to
-  # Linear — otherwise every issue gets two comments and you can't
-  # tell hook from agent. Uncomment the block below to re-enable.
-  #
-  # after_create: |
-  #   set -euo pipefail
-  #   IDENTIFIER="$(basename "$PWD")"
-  #
-  #   LOOKUP_QUERY='query($id: String!) { issue(id: $id) { id } }'
-  #   LOOKUP_BODY=$(node -e "
-  #     console.log(JSON.stringify({
-  #       query: process.argv[1],
-  #       variables: { id: process.argv[2] },
-  #     }));
-  #   " "$LOOKUP_QUERY" "$IDENTIFIER")
-  #   ISSUE_UUID=$(curl -sS https://api.linear.app/graphql \
-  #     -H "Authorization: $LINEAR_API_KEY" \
-  #     -H "Content-Type: application/json" \
-  #     -d "$LOOKUP_BODY" \
-  #     | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const j=JSON.parse(d);if(j.errors){console.error(JSON.stringify(j.errors));process.exit(2)};console.log(j.data.issue.id)})')
-  #
-  #   BODY="Symphony picked up this issue at $(date -u +%FT%TZ).
-  #   Workspace: \`$PWD\`."
-  #
-  #   MUTATION='mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success comment { id } } }'
-  #   MUTATION_BODY=$(node -e "
-  #     console.log(JSON.stringify({
-  #       query: process.argv[1],
-  #       variables: { id: process.argv[2], body: process.argv[3] },
-  #     }));
-  #   " "$MUTATION" "$ISSUE_UUID" "$BODY")
-  #   curl -sS https://api.linear.app/graphql \
-  #     -H "Authorization: $LINEAR_API_KEY" \
-  #     -H "Content-Type: application/json" \
-  #     -d "$MUTATION_BODY" \
-  #     > .comment-response.json
-  #   echo "after_create posted comment for $IDENTIFIER (uuid=$ISSUE_UUID)" > .ws-created
 ---
 
 You are working on Linear issue {{ issue.identifier }}: {{ issue.title }}.
@@ -123,8 +85,18 @@ Labels:
 {% for l in issue.labels %}- {{ l }}
 {% endfor %}
 
+The issue details above are already authoritative for this turn. Do not make
+a separate read-only Linear call just to inspect the same issue before acting.
+Keep Linear tool usage minimal; prefer the smallest number of GraphQL calls
+needed to post comments and transition state.
+
+When you need to do multiple Linear writes, batch them into one GraphQL
+operation whenever possible. For example, one mutation can create the opening
+comment and move the issue to `In Progress`; another can create the closing
+comment and move the issue to `Done`.
+
 When you start work, post a brief comment on this issue summarizing
-the plan, then move it to `In Progress`. 
+the plan, then move it to `In Progress`.
 
 When you finish or get stuck, post a closing comment AND move the issue to `Done` (or `Cancelled` if you're abandoning) — leaving it in `In Progress` causes the orchestrator to keep dispatching new turns every poll interval.
 

@@ -41,6 +41,7 @@ import {
   tool,
   createSdkMcpServer,
   type Query,
+  type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 
@@ -52,8 +53,8 @@ import { mapSdkMessage } from './event-mapping.js';
 import { loadSessionOrNull, saveSession, type SessionRecord } from './session-store.js';
 import { executeLinearGraphql, toCallToolResult } from '../tools/linear-graphql.js';
 
-/** Default Sonnet 4.5 alias per spike findings. */
-export const DEFAULT_MODEL = 'claude-sonnet-4-5';
+/** Default to Haiku for low-cost Linear automation. */
+export const DEFAULT_MODEL = 'claude-haiku-4-5';
 
 /**
  * Indirection over the SDK's `query` function so tests can stub the
@@ -61,14 +62,31 @@ export const DEFAULT_MODEL = 'claude-sonnet-4-5';
  */
 export type QueryFn = typeof sdkQuery;
 
+type ThinkingDisplay = 'summarized' | 'omitted';
+
+export type ClaudeThinkingConfig =
+  | { readonly type: 'disabled' }
+  | { readonly type: 'adaptive'; readonly display?: ThinkingDisplay | undefined }
+  | {
+      readonly type: 'enabled';
+      readonly budgetTokens?: number | undefined;
+      readonly display?: ThinkingDisplay | undefined;
+    };
+
 export interface ClaudeAgentArgs {
   /** Shared LinearClient — same instance the tracker uses. */
   readonly linearClient: LinearClient;
   /** Markdown skill text to inject as the system prompt every call. */
   readonly skillMarkdown: string;
   readonly logger: Logger;
-  /** Override the default Sonnet 4.5 alias. */
+  /** Override the default Haiku 4.5 alias. */
   readonly model?: string;
+  /** Claude SDK thinking/reasoning behavior. */
+  readonly thinking?: ClaudeThinkingConfig;
+  /** Maximum Claude SDK model round trips inside one query call. */
+  readonly maxModelRoundTrips?: number;
+  /** Optional SDK cost guard for one query call. */
+  readonly maxBudgetUsd?: number;
   /** Test seam — defaults to the real SDK `query`. */
   readonly queryFn?: QueryFn;
   /** Test seam — defaults to `() => new Date()`. */
@@ -80,6 +98,9 @@ export class ClaudeAgent implements AgentRunner {
   private readonly skillMarkdown: string;
   private readonly logger: Logger;
   private readonly model: string;
+  private readonly thinking: ThinkingConfig | undefined;
+  private readonly maxModelRoundTrips: number | undefined;
+  private readonly maxBudgetUsd: number | undefined;
   private readonly queryFn: QueryFn;
   private readonly now: () => Date;
   private readonly mcpServer: ReturnType<typeof createSdkMcpServer>;
@@ -89,6 +110,9 @@ export class ClaudeAgent implements AgentRunner {
     this.skillMarkdown = args.skillMarkdown;
     this.logger = args.logger;
     this.model = args.model ?? DEFAULT_MODEL;
+    this.thinking = toSdkThinkingConfig(args.thinking);
+    this.maxModelRoundTrips = args.maxModelRoundTrips;
+    this.maxBudgetUsd = args.maxBudgetUsd;
     this.queryFn = args.queryFn ?? sdkQuery;
     this.now = args.now ?? (() => new Date());
     this.mcpServer = this.buildLinearMcpServer();
@@ -165,9 +189,13 @@ export class ClaudeAgent implements AgentRunner {
             model: this.model,
             systemPrompt: this.skillMarkdown,
             mcpServers: { linear: this.mcpServer },
+            tools: [],
             allowedTools: ['mcp__linear__linear_graphql'],
             cwd: input.workspacePath,
             abortController,
+            ...(this.thinking !== undefined && { thinking: this.thinking }),
+            ...(this.maxModelRoundTrips !== undefined && { maxTurns: this.maxModelRoundTrips }),
+            ...(this.maxBudgetUsd !== undefined && { maxBudgetUsd: this.maxBudgetUsd }),
             ...(resumeWith !== null && { resume: resumeWith.sessionId }),
             // INTENTIONALLY DO NOT set persistSession: false. The
             // SDK's `resume:` option requires the SDK to have the
@@ -385,4 +413,19 @@ function stringifyCause(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   if (typeof cause === 'string') return cause;
   return String(cause);
+}
+
+function toSdkThinkingConfig(config: ClaudeThinkingConfig | undefined): ThinkingConfig | undefined {
+  if (config === undefined || config.type === 'disabled') return config;
+  if (config.type === 'adaptive') {
+    return {
+      type: 'adaptive',
+      ...(config.display !== undefined && { display: config.display }),
+    };
+  }
+  return {
+    type: 'enabled',
+    ...(config.budgetTokens !== undefined && { budgetTokens: config.budgetTokens }),
+    ...(config.display !== undefined && { display: config.display }),
+  };
 }

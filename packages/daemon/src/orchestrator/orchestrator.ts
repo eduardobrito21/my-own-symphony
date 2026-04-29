@@ -61,6 +61,7 @@ const DEFAULT_SCHEDULE: TimerSchedule = {
     globalThis.clearTimeout(handle as Parameters<typeof globalThis.clearTimeout>[0]);
   },
 };
+const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 
 export class Orchestrator {
   private readonly state: MutableOrchestratorState;
@@ -443,6 +444,8 @@ export class Orchestrator {
         ...(event.kind === 'usage' && {
           input_tokens: event.inputTokens,
           output_tokens: event.outputTokens,
+          cache_creation_input_tokens: event.cacheCreationInputTokens,
+          cache_read_input_tokens: event.cacheReadInputTokens,
           total_cost_usd: event.totalCostUsd,
         }),
         ...(event.kind === 'turn_failed' && { reason: event.reason }),
@@ -516,6 +519,7 @@ export class Orchestrator {
       // previous failure, increment off that.
       const prevAttempt = entry?.retryAttempt ?? 0;
       const nextAttempt = prevAttempt + 1;
+      const minDelayMs = isRateLimitError(error) ? RATE_LIMIT_RETRY_DELAY_MS : undefined;
       const delayMs = scheduleRetry({
         state: this.state,
         issueId: id,
@@ -523,6 +527,7 @@ export class Orchestrator {
         attempt: nextAttempt,
         delayKind: 'failure',
         maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
+        ...(minDelayMs !== undefined && { minDelayMs }),
         schedule: this.schedule,
         onFire: (retryId) => {
           void this.handleRetryFire(retryId);
@@ -581,6 +586,7 @@ export class Orchestrator {
       const entry = this.state.retryAttempts.get(id);
       if (entry === undefined) return;
       this.state.retryAttempts.delete(id);
+      this.state.claimed.delete(id);
 
       const log = this.logger.with({
         issue_id: id,
@@ -712,4 +718,10 @@ function stringifyCause(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   if (typeof cause === 'string') return cause;
   return String(cause);
+}
+
+function isRateLimitError(error: string | null): boolean {
+  if (error === null) return false;
+  const lower = error.toLowerCase();
+  return lower.includes('rate limit') || lower.includes('request rejected (429)');
 }

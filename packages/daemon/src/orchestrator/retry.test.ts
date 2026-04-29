@@ -82,6 +82,28 @@ describe('scheduleRetry', () => {
     expect(entry?.attempt).toBe(1);
     expect(entry?.identifier).toBe('SYMP-1');
     expect(entry?.dueAtMs).toBe(2_000); // now + delay
+    expect(state.claimed.has(IssueId('id-1'))).toBe(true);
+  });
+
+  it('honors a caller-provided minimum delay', () => {
+    const state = freshState();
+    const schedule = fakeSchedule();
+    const delay = scheduleRetry({
+      state,
+      issueId: IssueId('id-1'),
+      identifier: IssueIdentifier('SYMP-1'),
+      attempt: 1,
+      delayKind: 'failure',
+      maxRetryBackoffMs: 300_000,
+      minDelayMs: 60_000,
+      schedule,
+      onFire: () => {
+        /* test stub */
+      },
+      monotonicNow: () => 0,
+    });
+    expect(delay).toBe(60_000);
+    expect(schedule.fires[0]?.ms).toBe(60_000);
   });
 
   it('cancels a previous retry for the same issue when re-scheduling', () => {
@@ -150,8 +172,10 @@ describe('cancelRetry', () => {
       monotonicNow: () => 0,
     });
     expect(state.retryAttempts.size).toBe(1);
+    expect(state.claimed.has(IssueId('id-1'))).toBe(true);
     cancelRetry(state, IssueId('id-1'), schedule);
     expect(state.retryAttempts.size).toBe(0);
+    expect(state.claimed.has(IssueId('id-1'))).toBe(false);
     expect(fires).toHaveLength(0);
   });
 

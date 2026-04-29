@@ -33,6 +33,7 @@ export interface ScheduleRetryArgs {
   readonly attempt: number;
   readonly delayKind: RetryDelayKind;
   readonly maxRetryBackoffMs: number;
+  readonly minDelayMs?: number;
   readonly schedule: TimerSchedule;
   readonly onFire: (issueId: IssueId) => void;
   readonly error?: string;
@@ -52,6 +53,7 @@ export function scheduleRetry(args: ScheduleRetryArgs): number {
     attempt,
     delayKind,
     maxRetryBackoffMs,
+    minDelayMs,
     schedule,
     onFire,
     error,
@@ -65,7 +67,7 @@ export function scheduleRetry(args: ScheduleRetryArgs): number {
     schedule.clearTimeout(existing.timerHandle);
   }
 
-  const delayMs = computeDelay(delayKind, attempt, maxRetryBackoffMs);
+  const delayMs = Math.max(computeDelay(delayKind, attempt, maxRetryBackoffMs), minDelayMs ?? 0);
   const now = (monotonicNow ?? performance.now.bind(performance))();
 
   const handle = schedule.setTimeout(() => {
@@ -81,6 +83,7 @@ export function scheduleRetry(args: ScheduleRetryArgs): number {
     error: error ?? null,
   };
   state.retryAttempts.set(issueId, entry);
+  state.claimed.add(issueId);
 
   return delayMs;
 }
@@ -97,6 +100,7 @@ export function cancelRetry(
   if (existing === undefined) return;
   schedule.clearTimeout(existing.timerHandle);
   state.retryAttempts.delete(issueId);
+  state.claimed.delete(issueId);
 }
 
 /**
