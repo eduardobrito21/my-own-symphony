@@ -69,12 +69,7 @@ console.log('-'.repeat(100));
 for (const p of projects) {
   const teams = p.teams.nodes.map((t) => t.key).join(',');
   console.log(
-    [
-      (p.state ?? '').padEnd(10),
-      teams.padEnd(20),
-      p.slugId.padEnd(40),
-      p.name,
-    ].join(' '),
+    [(p.state ?? '').padEnd(10), teams.padEnd(20), p.slugId.padEnd(40), p.name].join(' '),
   );
 }
 console.log('\nCopy a `SLUG` value into examples/linear/WORKFLOW.md as `tracker.project_slug`.');

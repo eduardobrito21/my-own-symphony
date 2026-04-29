@@ -12,15 +12,18 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.build.json",
+    "build": "tsc --build tsconfig.build.json && pnpm run postbuild",
+    "postbuild": "mkdir -p dist/agent/claude && cp src/agent/claude/linear-skill.md dist/agent/claude/linear-skill.md",
     "clean": "tsc --build tsconfig.build.json --clean && rm -rf dist",
     "dev": "tsx src/index.ts",
     "dev:watch": "tsx --watch src/index.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.123",
     "@symphony/types": "workspace:*",
     "chokidar": "^4.0.3",
+    "graphql": "^16.13.2",
     "liquidjs": "^10.20.1",
     "yaml": "^2.6.1",
     "zod": "^3.24.1"

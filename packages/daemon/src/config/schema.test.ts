@@ -41,6 +41,9 @@ describe('buildServiceConfigSchema', () => {
       expect(result.agent.turn_timeout_ms).toBe(3_600_000);
       expect(result.agent.read_timeout_ms).toBe(5_000);
       expect(result.agent.stall_timeout_ms).toBe(300_000);
+      // Plan 07 — agent backend selector defaults.
+      expect(result.agent.kind).toBeUndefined();
+      expect(result.agent.model).toBe('claude-sonnet-4-5');
     });
 
     it('accepts a minimal config with just tracker.kind', () => {
@@ -173,6 +176,36 @@ describe('buildServiceConfigSchema', () => {
       const schema = buildServiceConfigSchema(BASE_DIR);
       const result = schema.parse({ agent: { stall_timeout_ms: -1 } });
       expect(result.agent.stall_timeout_ms).toBe(-1);
+    });
+  });
+
+  describe('agent backend selector (Plan 07)', () => {
+    it('accepts agent.kind=claude with a custom model', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      const result = schema.parse({
+        agent: { kind: 'claude', model: 'claude-sonnet-4-5-20250929' },
+      });
+      expect(result.agent.kind).toBe('claude');
+      expect(result.agent.model).toBe('claude-sonnet-4-5-20250929');
+    });
+
+    it('accepts agent.kind=mock and leaves model defaulted', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      const result = schema.parse({ agent: { kind: 'mock' } });
+      expect(result.agent.kind).toBe('mock');
+      expect(result.agent.model).toBe('claude-sonnet-4-5');
+    });
+
+    it('rejects an empty agent.model (typo guard)', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      expect(() => schema.parse({ agent: { model: '' } })).toThrow();
+    });
+
+    it('rejects a typo inside agent (no agent.api_key — auth comes from env)', () => {
+      const schema = buildServiceConfigSchema(BASE_DIR);
+      expect(() =>
+        schema.parse({ agent: { kind: 'claude', api_key: '$ANTHROPIC_API_KEY' } }),
+      ).toThrow(/api_key/);
     });
   });
 

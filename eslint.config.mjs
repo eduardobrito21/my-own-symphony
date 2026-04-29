@@ -12,11 +12,17 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/*.tsbuildinfo',
       'coverage/**',
+      // Top-level config files live outside any tsconfig — the
+      // type-aware rules below can't apply to them, so skip entirely.
       '*.cjs',
       '*.mjs',
       '*.js',
       'vitest.config.ts',
       '.dependency-cruiser.cjs',
+      // Helper scripts under `scripts/` get a dedicated, looser
+      // override block below — NOT a global ignore. They're real
+      // code that should be linted; just not under the strict
+      // type-aware rules that target the typed core.
     ],
   },
   eslint.configs.recommended,
@@ -64,6 +70,27 @@ export default tseslint.config(
     files: ['**/*.test.ts', '**/*.spec.ts'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+  {
+    // Helper scripts under `scripts/` are standalone Node `.mjs`
+    // files (e.g. list-linear-projects.mjs). They aren't part of the
+    // typed core and run as-is via `node --env-file=.env <path>`.
+    //
+    // We disable type-aware rules here (the parser can't infer types
+    // for plain JS without JSDoc) and declare the Node globals they
+    // rely on (`console`, `process`, `fetch`, etc.) so basic safety
+    // rules still run.
+    files: ['scripts/**/*.mjs', 'scripts/**/*.js'],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+      },
     },
   },
 );

@@ -39,17 +39,17 @@ project. The agent is still the `MockAgent` — Plan 07 wires real Claude.
 
 ## What you should see
 
-| Log line | Meaning |
-|---|---|
-| `workflow loaded tracker_kind="linear"` | Parsed your WORKFLOW.md |
-| `linear tracker ready endpoint="..." project_slug="..."` | Auth-ready, NO Linear call yet |
-| `tick start running=0 retrying=0` | First poll about to fire |
-| `tick end candidates=N dispatched=M` | `N` is real Linear active issues |
-| `dispatch issue_id="..." issue_identifier="ABC-123"` | An actual ticket of yours |
-| `agent_event ... kind="session_started"` | MockAgent fakes a session |
-| `worker_exit reason="normal" retry_kind="continuation"` | Mock finished, retry queued |
-| `retry_fired ... retry_released_claim` | Retry hit; not eligible (already_claimed) |
-| `signal received` → `clean shutdown complete` | SIGINT exit |
+| Log line                                                 | Meaning                                   |
+| -------------------------------------------------------- | ----------------------------------------- |
+| `workflow loaded tracker_kind="linear"`                  | Parsed your WORKFLOW.md                   |
+| `linear tracker ready endpoint="..." project_slug="..."` | Auth-ready, NO Linear call yet            |
+| `tick start running=0 retrying=0`                        | First poll about to fire                  |
+| `tick end candidates=N dispatched=M`                     | `N` is real Linear active issues          |
+| `dispatch issue_id="..." issue_identifier="ABC-123"`     | An actual ticket of yours                 |
+| `agent_event ... kind="session_started"`                 | MockAgent fakes a session                 |
+| `worker_exit reason="normal" retry_kind="continuation"`  | Mock finished, retry queued               |
+| `retry_fired ... retry_released_claim`                   | Retry hit; not eligible (already_claimed) |
+| `signal received` → `clean shutdown complete`            | SIGINT exit                               |
 
 If the project has zero `Todo`/`In Progress` issues, you'll see
 `candidates=0 dispatched=0` every tick — that's correct, nothing to do.

@@ -171,6 +171,22 @@ export function buildServiceConfigSchema(baseDir: string) {
   // unknown `codex` section through unvalidated.
   const AgentConfigSchema = z
     .object({
+      // Plan 07 — backend selector. The composition root branches on
+      // this to pick between MockAgent (default for back-compat with
+      // pre-Plan-07 workflows and CI fixtures) and ClaudeAgent. Like
+      // `tracker.kind`, we accept any string here and let the
+      // composition root reject unsupported values with a clear
+      // startup error. We deliberately do NOT add an `agent.api_key`
+      // field — the Claude Agent SDK reads `ANTHROPIC_API_KEY` from
+      // `process.env` itself; the composition root verifies it is
+      // present before instantiating ClaudeAgent.
+      kind: z.string().min(1).optional(),
+      // Plan 07 — model id for the `claude` backend. Default is the
+      // Sonnet 4.5 alias; override only when the user wants to pin a
+      // dated id (e.g. `claude-sonnet-4-5-20250929`). Ignored when
+      // `kind` is anything other than `claude`.
+      model: z.string().min(1).default('claude-sonnet-4-5'),
+
       // Orchestrator-level concurrency and retry policy.
       max_concurrent_agents: z.number().int().positive().default(10),
       max_turns: z.number().int().positive().default(20),
