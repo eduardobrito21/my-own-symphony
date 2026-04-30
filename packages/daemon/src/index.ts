@@ -28,10 +28,12 @@ import { WorkflowWatcher } from './config/watch.js';
 import { startHttpServer, type RunningHttpServer } from './http/server.js';
 import { createConsoleLogger, type Logger } from './observability/index.js';
 import { Orchestrator } from './orchestrator/index.js';
+import { singleProjectContext } from './orchestrator/project.js';
 import { startupTerminalCleanup } from './orchestrator/startup.js';
 import { FakeTracker, loadFixture } from './tracker/fake/index.js';
 import { LinearClient, LinearTracker } from './tracker/linear/index.js';
 import type { Tracker } from './tracker/tracker.js';
+import { ProjectKey } from './types/index.js';
 import { WorkspaceManager } from './workspace/index.js';
 
 async function main(): Promise<number> {
@@ -84,10 +86,21 @@ async function main(): Promise<number> {
   if (agent === null) return 1;
 
   // ---- Orchestrator ----
+  // Single-project compat mode (Plan 09c): synthesize a one-entry
+  // ProjectContextMap from the legacy WORKFLOW.md's tracker config.
+  // The synthesized project key is `default`. Multi-project loading
+  // from `symphony.yaml` is wired in a follow-up; this entrypoint
+  // stays back-compat with positional `pnpm symphony WORKFLOW.md`.
+  const projects = singleProjectContext({
+    key: ProjectKey('default'),
+    tracker,
+    activeStates: config.tracker.active_states,
+    terminalStates: config.tracker.terminal_states,
+  });
   const orchestrator = new Orchestrator({
     config,
     promptTemplateSource: promptTemplate,
-    tracker,
+    projects,
     workspaceManager,
     agent,
     logger,
@@ -97,9 +110,8 @@ async function main(): Promise<number> {
   // Runs once before the first tick. Prevents stale workspaces from
   // accumulating across restarts.
   await startupTerminalCleanup({
-    tracker,
+    projects,
     workspaceManager,
-    config,
     logger,
   });
 

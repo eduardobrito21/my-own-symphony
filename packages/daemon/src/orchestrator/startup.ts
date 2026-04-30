@@ -11,53 +11,65 @@
 // §11.4 explicitly says "Startup terminal cleanup failure: log
 // warning and continue startup."
 
-import type { ServiceConfig } from '../config/schema.js';
 import type { Logger } from '../observability/logger.js';
-import type { Tracker } from '../tracker/tracker.js';
 import type { WorkspaceManager } from '../workspace/index.js';
 
+import type { ProjectContextMap } from './project.js';
+
 export interface StartupCleanupArgs {
-  readonly tracker: Tracker;
+  /** Multi-project (Plan 09c). Each project's terminal-state list
+   *  is queried via that project's tracker and the resulting
+   *  workspaces are removed under the namespaced path. */
+  readonly projects: ProjectContextMap;
   readonly workspaceManager: WorkspaceManager;
-  readonly config: ServiceConfig;
   readonly logger: Logger;
 }
 
 /**
  * Sweep terminal-state workspaces. Best-effort; never throws.
+ *
+ * Multi-project (Plan 09c): iterates every project, fetches its
+ * own terminal issues with its own state-name list, and removes
+ * each workspace under the project-namespaced path. Per-project
+ * fetch failure is logged and that project is skipped — failures
+ * in one project do not block the others.
  */
 export async function startupTerminalCleanup(args: StartupCleanupArgs): Promise<void> {
-  const { tracker, workspaceManager, config, logger } = args;
-  const result = await tracker.fetchIssuesByStates({
-    states: config.tracker.terminal_states,
-  });
-  if (!result.ok) {
-    logger.warn('startup terminal cleanup failed; continuing startup', {
-      error_code: result.error.code,
+  const { projects, workspaceManager, logger } = args;
+  let totalCleaned = 0;
+  let totalCandidates = 0;
+
+  for (const ctx of projects.values()) {
+    const result = await ctx.tracker.fetchIssuesByStates({
+      states: ctx.terminalStates,
     });
-    return;
-  }
-
-  if (result.value.length === 0) {
-    logger.info('startup terminal cleanup: no terminal issues to sweep');
-    return;
-  }
-
-  let cleaned = 0;
-  for (const issue of result.value) {
-    try {
-      await workspaceManager.removeForTerminal(issue.identifier);
-      cleaned += 1;
-    } catch (cause) {
-      logger.warn('failed to remove terminal workspace; continuing', {
-        issue_id: issue.id,
-        issue_identifier: issue.identifier,
-        cause,
+    if (!result.ok) {
+      logger.warn('startup terminal cleanup failed for project; continuing', {
+        project_key: ctx.key,
+        error_code: result.error.code,
       });
+      continue;
+    }
+    totalCandidates += result.value.length;
+
+    for (const issue of result.value) {
+      try {
+        await workspaceManager.removeForTerminal(issue.identifier, ctx.key);
+        totalCleaned += 1;
+      } catch (cause) {
+        logger.warn('failed to remove terminal workspace; continuing', {
+          issue_id: issue.id,
+          issue_identifier: issue.identifier,
+          project_key: ctx.key,
+          cause,
+        });
+      }
     }
   }
+
   logger.info('startup terminal cleanup complete', {
-    candidates: result.value.length,
-    cleaned,
+    candidates: totalCandidates,
+    cleaned: totalCleaned,
+    projects: projects.size,
   });
 }

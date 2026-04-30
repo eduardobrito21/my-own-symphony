@@ -12,7 +12,12 @@
 
 import type { ReactNode } from 'react';
 
-import type { RetryEntryWire, RunningEntryWire, StateSnapshotWire } from './api-types';
+import type {
+  ProjectSnapshotWire,
+  RetryEntryWire,
+  RunningEntryWire,
+  StateSnapshotWire,
+} from './api-types';
 import { formatDuration, formatTimestamp, formatTokens } from './format';
 import { useSnapshot } from './use-snapshot';
 
@@ -56,10 +61,53 @@ export default function Page(): ReactNode {
           <RetryingPanel snapshot={snapshot} />
         </div>
         <div>
+          <ProjectsPanel snapshot={snapshot} />
+          <div style={{ height: 16 }} />
           <TotalsPanel snapshot={snapshot} />
           <div style={{ height: 16 }} />
           <CompletedPanel snapshot={snapshot} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Projects panel (Plan 09c) --------------------------------------
+
+function ProjectsPanel({ snapshot }: { snapshot: StateSnapshotWire | null }): ReactNode {
+  const projects = snapshot?.projects ?? [];
+  // Single-project deployments don't add value with a "1 project,
+  // shows everything" panel, so we collapse it to nothing in that
+  // case. Keep the panel for multi-project + when explicitly empty
+  // (debugging "is the snapshot wired?").
+  if (projects.length <= 1) return null;
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <span>projects</span>
+        <span className="count">{projects.length}</span>
+      </div>
+      <div className="panel-body">
+        {projects.map((p) => (
+          <ProjectRow key={p.projectKey} project={p} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProjectRow({ project }: { project: ProjectSnapshotWire }): ReactNode {
+  return (
+    <div className="row">
+      <div className="top">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="id">{project.projectKey}</div>
+        </div>
+      </div>
+      <div className="meta">
+        <span>running {project.running}</span>
+        <span>retrying {project.retrying}</span>
+        <span>completed {project.completed}</span>
       </div>
     </div>
   );
@@ -107,6 +155,9 @@ function RunningRow({ entry, now }: { entry: RunningEntryWire; now: string | nul
       </div>
       <div className="meta">
         <span className="badge">{entry.issue.state}</span>
+        {entry.issue.projectKey !== 'default' && (
+          <span className="badge">{entry.issue.projectKey}</span>
+        )}
         <span>turn {entry.session.turnCount}</span>
         <span>started {formatDuration(sinceMs)} ago</span>
         <span>{formatTokens(entry.session.tokens.totalTokens)} tok</span>

@@ -10,7 +10,7 @@
 //   codex_totals      -> agentTotals
 //   codex_rate_limits -> agentRateLimits
 
-import type { IssueId } from './ids.js';
+import type { IssueId, ProjectKey } from './ids.js';
 import type { Issue } from './issue.js';
 import type { RetryEntry } from './retry-entry.js';
 import type { LiveSession } from './session.js';
@@ -38,6 +38,20 @@ export interface RunningEntry {
 }
 
 /**
+ * Per-project breakdown of orchestrator state (ADR 0009 / Plan 09).
+ * Counters here are derivable from `running` / `retryAttempts` /
+ * `completed` plus each issue's `projectKey`, but precomputing them
+ * makes the dashboard's per-project panel a constant-time lookup
+ * rather than a fold across every entry on every snapshot.
+ */
+export interface ProjectSnapshot {
+  readonly projectKey: ProjectKey;
+  readonly running: number;
+  readonly retrying: number;
+  readonly completed: number;
+}
+
+/**
  * The single-authority orchestrator state. Plan 04 defines the
  * mutator surface; consumers here are read-only.
  */
@@ -51,6 +65,13 @@ export interface OrchestratorState {
   /** Bookkeeping only; not used to gate dispatch. */
   readonly completed: ReadonlySet<IssueId>;
   readonly agentTotals: AgentTotals;
+  /**
+   * Per-project breakdown — one entry per project the daemon is
+   * watching, with running/retrying/completed counts. Stable order
+   * is the project order from the deployment YAML so the dashboard
+   * doesn't reshuffle on every poll.
+   */
+  readonly projects: readonly ProjectSnapshot[];
   /**
    * Latest rate-limit payload seen on any agent event. Shape is
    * agent-specific; we model it as `unknown` (which already includes

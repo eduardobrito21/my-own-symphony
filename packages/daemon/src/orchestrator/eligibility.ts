@@ -12,7 +12,7 @@
 //   - global concurrency slots available
 //   - per-state concurrency slots available
 
-import type { AgentConfig, TrackerConfig } from '../config/schema.js';
+import type { AgentConfig } from '../config/schema.js';
 import type { Issue } from '../types/index.js';
 import {
   evaluateEligibility,
@@ -40,7 +40,12 @@ export type RuntimeEligibilityResult =
 
 export interface RuntimeEligibilityArgs {
   readonly state: MutableOrchestratorState;
-  readonly tracker: TrackerConfig;
+  /** Per-project active states (Plan 09c). Was previously
+   *  `tracker.active_states` from the single ServiceConfig. */
+  readonly activeStates: readonly string[];
+  /** Per-project terminal states (Plan 09c). Was previously
+   *  `tracker.terminal_states` from the single ServiceConfig. */
+  readonly terminalStates: readonly string[];
   readonly agent: AgentConfig;
 }
 
@@ -58,8 +63,8 @@ export function evaluateRuntimeEligibility(
   args: RuntimeEligibilityArgs,
 ): RuntimeEligibilityResult {
   const structural = evaluateEligibility(issue, {
-    activeStates: args.tracker.active_states,
-    terminalStates: args.tracker.terminal_states,
+    activeStates: args.activeStates,
+    terminalStates: args.terminalStates,
   });
   if (!structural.eligible) {
     return liftStructural(structural);

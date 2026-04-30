@@ -33,11 +33,20 @@ declare const IssueIdBrand: unique symbol;
 declare const IssueIdentifierBrand: unique symbol;
 declare const WorkspaceKeyBrand: unique symbol;
 declare const SessionIdBrand: unique symbol;
+declare const ProjectKeyBrand: unique symbol;
 
 export type IssueId = string & { readonly [IssueIdBrand]: true };
 export type IssueIdentifier = string & { readonly [IssueIdentifierBrand]: true };
 export type WorkspaceKey = string & { readonly [WorkspaceKeyBrand]: true };
 export type SessionId = string & { readonly [SessionIdBrand]: true };
+/**
+ * Multi-project identifier (ADR 0009). Sanitized form of the operator's
+ * project label (typically the Linear project_slug). Must match the
+ * same character set as `WorkspaceKey` because it appears in
+ * filesystem paths (`<workspace.root>/<project_key>/<issue_id>/`)
+ * and docker container names (`symphony-<project>-<issue>`).
+ */
+export type ProjectKey = string & { readonly [ProjectKeyBrand]: true };
 
 /**
  * Construct an `IssueId`. Validates that the input is a non-empty string.
@@ -101,4 +110,22 @@ export function SessionId(value: string): SessionId {
  */
 export function composeSessionId(threadId: string, turnId: string): SessionId {
   return SessionId(`${threadId}-${turnId}`);
+}
+
+/**
+ * Construct a `ProjectKey`. Validates the same sanitized character
+ * set as `WorkspaceKey` because the value appears in filesystem
+ * paths and docker container names.
+ *
+ * @throws if `value` contains characters outside `[A-Za-z0-9._-]`
+ *         or is empty.
+ */
+export function ProjectKey(value: string): ProjectKey {
+  if (value === '' || !/^[A-Za-z0-9._-]+$/.test(value)) {
+    throw new Error(
+      `ProjectKey must match /^[A-Za-z0-9._-]+$/ (got '${value}'). ` +
+        `Use sanitizeProjectSlug() to derive a key from a Linear project slug.`,
+    );
+  }
+  return value as ProjectKey;
 }

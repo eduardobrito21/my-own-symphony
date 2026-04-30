@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { IssueId, IssueIdentifier, type Issue } from '../types/index.js';
+import { IssueId, IssueIdentifier, ProjectKey, type Issue } from '../types/index.js';
 
 import { parseAndRenderPrompt, parsePromptTemplate, renderPrompt } from './prompt.js';
 
@@ -8,6 +8,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: IssueId('id-1'),
     identifier: IssueIdentifier('SYMP-1'),
+    projectKey: ProjectKey('default'),
     title: 'Fix the bug',
     description: 'A description.',
     priority: 1,

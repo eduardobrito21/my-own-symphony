@@ -18,18 +18,22 @@
 // reconciliation cancellations should NOT trigger a retry. We
 // communicate that via the `canceled` set on the orchestrator state.
 
-import type { ServiceConfig } from '../config/schema.js';
 import type { Logger } from '../observability/logger.js';
 import { isStateAmong } from '../tracker/state-matching.js';
-import type { Tracker } from '../tracker/tracker.js';
-import type { IssueId } from '../types/index.js';
+import type { IssueId, ProjectKey } from '../types/index.js';
 
+import type { ProjectContextMap } from './project.js';
 import type { MutableOrchestratorState } from './state.js';
 
 export interface ReconcileArgs {
   readonly state: MutableOrchestratorState;
-  readonly tracker: Tracker;
-  readonly config: ServiceConfig;
+  /** Multi-project (Plan 09c): one tracker per project. Reconcile
+   *  splits running issues by their stamped projectKey and calls
+   *  each project's tracker for state refresh. */
+  readonly projects: ProjectContextMap;
+  /** Daemon-wide stall timeout (per SPEC §5.3.6 / config). `<= 0`
+   *  disables stall detection. */
+  readonly stallTimeoutMs: number;
   readonly logger: Logger;
   /** Called for each issue the reconciler decides to terminate. */
   readonly onTerminate: (issueId: IssueId, opts: { cleanupWorkspace: boolean }) => void;
@@ -50,11 +54,10 @@ export async function reconcile(args: ReconcileArgs): Promise<void> {
 
 /**
  * Pass A. Detect and abort stalled workers. Disabled when
- * `stall_timeout_ms <= 0`.
+ * `stallTimeoutMs <= 0`.
  */
 export function reconcileStalledRuns(args: ReconcileArgs): void {
-  const { state, config, logger, onStall } = args;
-  const stallTimeoutMs = config.agent.stall_timeout_ms;
+  const { state, stallTimeoutMs, logger, onStall } = args;
   if (stallTimeoutMs <= 0) return;
 
   const now = (args.now ?? (() => new Date()))();
@@ -78,52 +81,80 @@ export function reconcileStalledRuns(args: ReconcileArgs): void {
  * Pass B. Refresh tracker states for every running issue and act on
  * the result.
  *
- * On fetch failure we keep all current workers running and try again
- * next tick (SPEC §8.5: "If state refresh fails, keep workers
- * running and try again on the next tick").
+ * Multi-project (Plan 09c): groups running IDs by `projectKey` and
+ * fans out to per-project trackers in parallel. Each project's
+ * tracker uses that project's `active_states`/`terminal_states`
+ * vocabulary for the active/terminal classification.
+ *
+ * On per-project fetch failure we keep that project's workers
+ * running and try again next tick (SPEC §8.5: "If state refresh
+ * fails, keep workers running and try again on the next tick").
+ * Other projects' refreshes are unaffected — one slow project does
+ * not stall the rest.
  */
 export async function reconcileTrackerStates(args: ReconcileArgs): Promise<void> {
-  const { state, tracker, config, logger, onTerminate } = args;
-  const runningIds = [...state.running.keys()];
-  if (runningIds.length === 0) return;
+  const { state, projects, logger, onTerminate } = args;
+  if (state.running.size === 0) return;
 
-  const result = await tracker.fetchIssueStatesByIds({ ids: runningIds });
-  if (!result.ok) {
-    logger.warn('tracker state refresh failed; keeping workers', {
-      error_code: result.error.code,
-    });
-    return;
+  // Group running issue IDs by projectKey.
+  const idsByProject = new Map<ProjectKey, IssueId[]>();
+  for (const [id, entry] of state.running) {
+    const key = entry.issue.projectKey;
+    const list = idsByProject.get(key);
+    if (list === undefined) idsByProject.set(key, [id]);
+    else list.push(id);
   }
 
-  for (const issue of result.value) {
-    if (isStateAmong(issue.state, config.tracker.terminal_states)) {
-      logger.info('tracker reports terminal; terminating run', {
-        issue_id: issue.id,
-        issue_identifier: issue.identifier,
-        state: issue.state,
-      });
-      onTerminate(issue.id, { cleanupWorkspace: true });
-      continue;
-    }
-    if (isStateAmong(issue.state, config.tracker.active_states)) {
-      // Active state — update the in-memory snapshot so logs and
-      // the snapshot endpoint reflect the current state. Mutating
-      // through the typed `running` map is allowed here because
-      // we hold the orchestrator's lock.
-      const entry = state.running.get(issue.id);
-      if (entry !== undefined) {
-        entry.issue = issue;
+  // Fetch per project in parallel; per-project failure is local.
+  await Promise.all(
+    [...idsByProject.entries()].map(async ([projectKey, ids]) => {
+      const ctx = projects.get(projectKey);
+      if (ctx === undefined) {
+        logger.warn('reconcile: running issue references unknown project; skipping', {
+          project_key: projectKey,
+          running_count: ids.length,
+        });
+        return;
       }
-      continue;
-    }
-    // Neither active nor terminal — paused / on-hold / a custom
-    // workflow state. SPEC §8.5: terminate without cleanup so the
-    // workspace is preserved if the issue returns to active later.
-    logger.info('tracker reports non-active state; terminating without workspace cleanup', {
-      issue_id: issue.id,
-      issue_identifier: issue.identifier,
-      state: issue.state,
-    });
-    onTerminate(issue.id, { cleanupWorkspace: false });
-  }
+
+      const result = await ctx.tracker.fetchIssueStatesByIds({ ids });
+      if (!result.ok) {
+        logger.warn('tracker state refresh failed; keeping workers for project', {
+          project_key: projectKey,
+          error_code: result.error.code,
+        });
+        return;
+      }
+
+      for (const rawIssue of result.value) {
+        // Re-stamp projectKey on the refreshed issue so the
+        // running-entry update preserves multi-project metadata.
+        const issue = { ...rawIssue, projectKey: ctx.key };
+        if (isStateAmong(issue.state, ctx.terminalStates)) {
+          logger.info('tracker reports terminal; terminating run', {
+            issue_id: issue.id,
+            issue_identifier: issue.identifier,
+            project_key: ctx.key,
+            state: issue.state,
+          });
+          onTerminate(issue.id, { cleanupWorkspace: true });
+          continue;
+        }
+        if (isStateAmong(issue.state, ctx.activeStates)) {
+          const entry = state.running.get(issue.id);
+          if (entry !== undefined) {
+            entry.issue = issue;
+          }
+          continue;
+        }
+        logger.info('tracker reports non-active state; terminating without workspace cleanup', {
+          issue_id: issue.id,
+          issue_identifier: issue.identifier,
+          project_key: ctx.key,
+          state: issue.state,
+        });
+        onTerminate(issue.id, { cleanupWorkspace: false });
+      }
+    }),
+  );
 }

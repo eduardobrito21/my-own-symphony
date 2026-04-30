@@ -13,18 +13,19 @@ import type { AgentEvent, AgentRunner } from '../agent/runner.js';
 import type { ServiceConfig, WorkflowDefinition } from '../config/schema.js';
 import type { Logger } from '../observability/index.js';
 import { sortForDispatch } from '../tracker/sort.js';
-import type { Tracker } from '../tracker/tracker.js';
 import {
   composeSessionId,
   type Issue,
   type IssueId,
   type IssueIdentifier,
   type OrchestratorState,
+  type ProjectKey,
 } from '../types/index.js';
 import type { WorkspaceManager } from '../workspace/index.js';
 
 import { evaluateRuntimeEligibility } from './eligibility.js';
 import { AsyncLock } from './lock.js';
+import type { ProjectContextMap } from './project.js';
 import { reconcile } from './reconcile.js';
 import { cancelRetry, scheduleRetry } from './retry.js';
 import {
@@ -38,7 +39,14 @@ import {
 export interface OrchestratorArgs {
   readonly config: ServiceConfig;
   readonly promptTemplateSource: string;
-  readonly tracker: Tracker;
+  /**
+   * Multi-project (Plan 09c). One context per Linear project the
+   * daemon is watching. The orchestrator iterates this map per
+   * tick to fetch candidates from each project's tracker. For
+   * single-project deployments (legacy WORKFLOW.md, current tests),
+   * pass a one-entry map via `singleProjectContext(...)`.
+   */
+  readonly projects: ProjectContextMap;
   readonly workspaceManager: WorkspaceManager;
   readonly agent: AgentRunner;
   readonly logger: Logger;
@@ -66,7 +74,7 @@ const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 export class Orchestrator {
   private readonly state: MutableOrchestratorState;
   private readonly lock = new AsyncLock();
-  private readonly tracker: Tracker;
+  private readonly projects: ProjectContextMap;
   private readonly workspaceManager: WorkspaceManager;
   private readonly agent: AgentRunner;
   private readonly logger: Logger;
@@ -93,7 +101,10 @@ export class Orchestrator {
   private stopped = false;
 
   constructor(args: OrchestratorArgs) {
-    this.tracker = args.tracker;
+    if (args.projects.size === 0) {
+      throw new Error('Orchestrator requires at least one ProjectContext.');
+    }
+    this.projects = args.projects;
     this.workspaceManager = args.workspaceManager;
     this.agent = args.agent;
     this.logger = args.logger;
@@ -104,6 +115,7 @@ export class Orchestrator {
     this.state = createInitialState({
       pollIntervalMs: args.config.polling.interval_ms,
       maxConcurrentAgents: args.config.agent.max_concurrent_agents,
+      projectKeys: [...args.projects.keys()],
     });
     this.parsedTemplate = parsePromptTemplate(args.promptTemplateSource);
   }
@@ -180,14 +192,18 @@ export class Orchestrator {
     this.logger.info('tick start', {
       running: this.state.running.size,
       retrying: this.state.retryAttempts.size,
+      projects: this.projects.size,
     });
 
-    // Plan 05: reconciliation runs every tick, BEFORE dispatch (per
-    // SPEC §8.1).
+    // Plan 05 + Plan 09c: reconciliation runs every tick, BEFORE
+    // dispatch (per SPEC §8.1). Multi-project: fan out per-project
+    // by splitting running issues by their stamped projectKey and
+    // calling each project's tracker with that project's terminal/
+    // active state vocabulary.
     await reconcile({
       state: this.state,
-      tracker: this.tracker,
-      config: this.config,
+      projects: this.projects,
+      stallTimeoutMs: this.config.agent.stall_timeout_ms,
       logger: this.logger,
       now: this.now,
       onTerminate: (id, opts) => {
@@ -202,28 +218,52 @@ export class Orchestrator {
       },
     });
 
-    const fetched = await this.tracker.fetchCandidateIssues({
-      activeStates: this.config.tracker.active_states,
-    });
-    if (!fetched.ok) {
-      this.logger.warn('tracker fetch failed; skipping dispatch this tick', {
-        error_code: fetched.error.code,
+    // Per-project poll: gather candidates from each tracker,
+    // stamping the project key onto every accumulated Issue.
+    // Trackers don't know about multi-project; the orchestrator
+    // owns the stamping (Plan 09c decision: keep tracker layer
+    // ignorant of project membership).
+    const allCandidates: Issue[] = [];
+    for (const ctx of this.projects.values()) {
+      const fetched = await ctx.tracker.fetchCandidateIssues({
+        activeStates: ctx.activeStates,
       });
-      return;
+      if (!fetched.ok) {
+        this.logger.warn('tracker fetch failed; skipping project this tick', {
+          project_key: ctx.key,
+          error_code: fetched.error.code,
+        });
+        continue;
+      }
+      for (const issue of fetched.value) {
+        allCandidates.push({ ...issue, projectKey: ctx.key });
+      }
     }
 
-    const candidates = sortForDispatch(fetched.value);
+    const candidates = sortForDispatch(allCandidates);
     let dispatched = 0;
     for (const issue of candidates) {
+      const ctx = this.projects.get(issue.projectKey);
+      if (ctx === undefined) {
+        // Should not happen — we just stamped projectKey from
+        // ctx.key. Defensive log + skip.
+        this.logger.warn('candidate has unknown projectKey; skipping', {
+          issue_id: issue.id,
+          project_key: issue.projectKey,
+        });
+        continue;
+      }
       const eligibility = evaluateRuntimeEligibility(issue, {
         state: this.state,
-        tracker: this.config.tracker,
+        activeStates: ctx.activeStates,
+        terminalStates: ctx.terminalStates,
         agent: this.config.agent,
       });
       if (!eligibility.eligible) {
         this.logger.info('skip', {
           issue_id: issue.id,
           issue_identifier: issue.identifier,
+          project_key: issue.projectKey,
           reason: eligibility.reason,
         });
         continue;
@@ -332,7 +372,10 @@ export class Orchestrator {
     const startedAt = this.now();
 
     try {
-      const workspaceResult = await this.workspaceManager.prepareForRun(issue.identifier);
+      const workspaceResult = await this.workspaceManager.prepareForRun(
+        issue.identifier,
+        issue.projectKey,
+      );
       if (!workspaceResult.ok) {
         exitReason = 'abnormal';
         exitError = `workspace_${workspaceResult.error.code}`;
@@ -490,12 +533,19 @@ export class Orchestrator {
     }
 
     const identifier = entry?.issue.identifier ?? ('unknown' as IssueIdentifier);
+    // Project key for the retry. If the worker entry is gone (it
+    // shouldn't be — the worker just exited), fall back to the
+    // first project's key to keep the snapshot's per-project
+    // counter semi-meaningful.
+    const projectKey = entry?.issue.projectKey ?? this.firstProjectKey();
     if (reason === 'normal') {
       this.state.completed.add(id);
       const delayMs = scheduleRetry({
         state: this.state,
         issueId: id,
         identifier,
+        projectKey,
+        ...(entry?.issue !== undefined && { issue: entry.issue }),
         attempt: 1,
         delayKind: 'continuation',
         maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
@@ -524,6 +574,8 @@ export class Orchestrator {
         state: this.state,
         issueId: id,
         identifier,
+        projectKey,
+        ...(entry?.issue !== undefined && { issue: entry.issue }),
         attempt: nextAttempt,
         delayKind: 'failure',
         maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
@@ -565,7 +617,8 @@ export class Orchestrator {
     cancelRetry(this.state, id, this.schedule);
     if (opts.cleanupWorkspace) {
       const identifier = entry.issue.identifier;
-      void this.workspaceManager.removeForTerminal(identifier);
+      const projectKey = entry.issue.projectKey;
+      void this.workspaceManager.removeForTerminal(identifier, projectKey);
     }
     // We do not remove from `running` here — `completeWorker` does
     // that in its `finally` after the worker promise settles. The
@@ -591,17 +644,31 @@ export class Orchestrator {
       const log = this.logger.with({
         issue_id: id,
         issue_identifier: entry.identifier,
+        project_key: entry.projectKey,
       });
       log.info('retry_fired', { attempt: entry.attempt });
 
-      const candidates = await this.tracker.fetchCandidateIssues({
-        activeStates: this.config.tracker.active_states,
+      const ctx = this.projects.get(entry.projectKey);
+      if (ctx === undefined) {
+        // The project this retry belongs to is no longer in the
+        // deployment config (operator removed it between schedule
+        // and fire). Release the claim and drop the retry; we do
+        // not query a removed project.
+        this.state.claimed.delete(id);
+        log.warn('retry_released_claim', { reason: 'project_removed' });
+        return;
+      }
+
+      const candidates = await ctx.tracker.fetchCandidateIssues({
+        activeStates: ctx.activeStates,
       });
       if (!candidates.ok) {
         const delayMs = scheduleRetry({
           state: this.state,
           issueId: id,
           identifier: entry.identifier,
+          projectKey: entry.projectKey,
+          ...(entry.issue !== undefined && { issue: entry.issue }),
           attempt: entry.attempt + 1,
           delayKind: 'failure',
           maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
@@ -620,16 +687,20 @@ export class Orchestrator {
         return;
       }
 
-      const issue = candidates.value.find((i) => i.id === id);
-      if (issue === undefined) {
+      const rawIssue = candidates.value.find((i) => i.id === id);
+      if (rawIssue === undefined) {
         this.state.claimed.delete(id);
         log.info('retry_released_claim', { reason: 'not_in_active_states' });
         return;
       }
+      // Stamp the projectKey before downstream use (the tracker
+      // doesn't populate it).
+      const issue: Issue = { ...rawIssue, projectKey: entry.projectKey };
 
       const eligibility = evaluateRuntimeEligibility(issue, {
         state: this.state,
-        tracker: this.config.tracker,
+        activeStates: ctx.activeStates,
+        terminalStates: ctx.terminalStates,
         agent: this.config.agent,
       });
       if (eligibility.eligible) {
@@ -642,6 +713,8 @@ export class Orchestrator {
           state: this.state,
           issueId: id,
           identifier: issue.identifier,
+          projectKey: entry.projectKey,
+          issue,
           attempt: entry.attempt + 1,
           delayKind: 'failure',
           maxRetryBackoffMs: this.config.agent.max_retry_backoff_ms,
@@ -663,6 +736,17 @@ export class Orchestrator {
       this.state.claimed.delete(id);
       log.info('retry_released_claim', { reason: eligibility.reason });
     });
+  }
+
+  /** First project key in deployment order. Used as a fallback when
+   *  the orchestrator needs a projectKey but the issue is missing
+   *  (defensive — entries should always carry one). */
+  private firstProjectKey(): ProjectKey {
+    const first = this.projects.keys().next().value;
+    if (first === undefined) {
+      throw new Error('Orchestrator has no projects (constructor invariant violated).');
+    }
+    return first;
   }
 }
 

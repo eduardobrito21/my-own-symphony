@@ -31,7 +31,12 @@ import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { HooksConfig } from '../config/schema.js';
-import { sanitizeIdentifier, type IssueIdentifier, type Workspace } from '../types/index.js';
+import {
+  sanitizeIdentifier,
+  type IssueIdentifier,
+  type ProjectKey,
+  type Workspace,
+} from '../types/index.js';
 
 import type {
   WorkspaceCreationError,
@@ -104,9 +109,13 @@ export class WorkspaceManager {
    * Compute the workspace path without touching the filesystem.
    * Useful for the agent runner's pre-launch `cwd === workspacePath`
    * sanity check (SPEC §15.2 invariant 1).
+   *
+   * Multi-project (Plan 09): pass the issue's `projectKey` to
+   * namespace the path. Pass `null` (or omit) for legacy
+   * single-project layout (back-compat).
    */
-  pathFor(identifier: IssueIdentifier): string {
-    return workspacePathFor(this.root, identifier);
+  pathFor(identifier: IssueIdentifier, projectKey: ProjectKey | null = null): string {
+    return workspacePathFor(this.root, identifier, projectKey);
   }
 
   /**
@@ -115,10 +124,13 @@ export class WorkspaceManager {
    * Reusing an existing workspace is the common case (workspaces are
    * preserved across runs per SPEC §9.1).
    */
-  async createForIssue(identifier: IssueIdentifier): Promise<CreateResult> {
+  async createForIssue(
+    identifier: IssueIdentifier,
+    projectKey: ProjectKey | null = null,
+  ): Promise<CreateResult> {
     let path: string;
     try {
-      path = workspacePathFor(this.root, identifier);
+      path = workspacePathFor(this.root, identifier, projectKey);
     } catch (cause) {
       // workspacePathFor throws a `WorkspaceContainmentException` that
       // carries a typed `WorkspaceContainmentError` payload. Lift the
@@ -163,8 +175,11 @@ export class WorkspaceManager {
    * `before_run`. Used by the orchestrator's worker before launching
    * the agent.
    */
-  async prepareForRun(identifier: IssueIdentifier): Promise<PrepareResult> {
-    const created = await this.createForIssue(identifier);
+  async prepareForRun(
+    identifier: IssueIdentifier,
+    projectKey: ProjectKey | null = null,
+  ): Promise<PrepareResult> {
+    const created = await this.createForIssue(identifier, projectKey);
     if (!created.ok) return created;
 
     if (this.hooks.before_run !== undefined) {
@@ -209,10 +224,13 @@ export class WorkspaceManager {
    * are both logged and ignored so the orchestrator's startup sweep
    * is not blocked by an unhealthy workspace.
    */
-  async removeForTerminal(identifier: IssueIdentifier): Promise<void> {
+  async removeForTerminal(
+    identifier: IssueIdentifier,
+    projectKey: ProjectKey | null = null,
+  ): Promise<void> {
     let path: string;
     try {
-      path = workspacePathFor(this.root, identifier);
+      path = workspacePathFor(this.root, identifier, projectKey);
     } catch (cause) {
       // Containment failure during removal would mean someone tried
       // to remove a path outside the root — refuse loudly.

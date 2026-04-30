@@ -1,0 +1,79 @@
+# Symphony deployment config (operator-side).
+#
+# This file is owned by whoever runs Symphony — it is the daemon's
+# startup configuration. It declares which Linear projects to watch,
+# where workspaces live, daemon-wide concurrency + budget caps, the
+# ExecutionBackend selector, and per-project repo coordinates.
+#
+# What is NOT in this file (intentionally):
+#   - Per-repo prompt templates / hooks / allowed tools — those live
+#     in `<repo>/.symphony/workflow.md` and are loaded by the agent
+#     pod after cloning the repo (per ADR 0011).
+#   - Tracker credentials — `LINEAR_API_KEY`, `GITHUB_TOKEN`,
+#     `ANTHROPIC_API_KEY` flow as env vars on the daemon process and
+#     are forwarded into pods.
+#
+# Adding a new project = one new entry under `projects:`.
+
+polling:
+  interval_ms: 30000
+
+workspace:
+  # Per-issue workspaces live under this root, namespaced by project:
+  #   <root>/<project_key>/<issue_id>/
+  root: /var/lib/symphony/workspaces
+
+agent:
+  # The orchestrator backend selector. `claude` is the production
+  # value; `mock` is for local development against FakeTracker.
+  kind: claude
+
+  # Operator-side defaults. Per-repo `.symphony/workflow.md` may
+  # override `model` / `max_turns` / `max_budget_usd`. The pod takes
+  # `min(operator, repo)` for budget fields; repo wins for `model`.
+  model: claude-haiku-4-5
+  max_turns: 20
+  max_budget_usd: 5.00
+
+  # Daemon-wide concurrency caps (NOT overridable per-repo).
+  max_concurrent_agents: 3
+  max_retry_backoff_ms: 300000
+
+execution:
+  # `local-docker` (Plan 10) runs each per-issue agent in a sibling
+  # Docker container on the host. `fake` runs the FakeBackend
+  # in-memory — useful for dry runs that don't actually start
+  # containers.
+  backend: local-docker
+
+  # Default agent image. A project entry can override via
+  # `agent_image:`, or ship `.symphony/agent.dockerfile` /
+  # `.devcontainer/Dockerfile` for repo-specific deps.
+  base_image: symphony/agent-base:1
+
+hooks:
+  timeout_ms: 60000
+
+projects:
+  # Symphony self-hosts: the Symphony repo itself is one of the
+  # watched projects. The agent works on Symphony issues using
+  # Symphony's own conventions (TS strict, pnpm test, layer rules).
+  - linear:
+      project_slug: REPLACE_WITH_SYMPHONY_LINEAR_PROJECT_SLUG
+    repo:
+      url: https://github.com/eduardobrito/my-own-symphony.git
+      default_branch: main
+      # Optional: explicit image tag. Skipped → resolution order
+      # checks .symphony/agent.dockerfile then .devcontainer then
+      # falls back to base_image.
+      agent_image: symphony-agent/symphony:latest
+
+  # Add additional projects here. Example:
+  #
+  # - linear:
+  #     project_slug: <other-project-slug>
+  #   repo:
+  #     url: https://github.com/your-org/marketing-site.git
+  #     default_branch: production
+  #     workflow_path: .symphony/workflow.md   # default, can omit
+  #     branch_prefix: symphony/                # default, can omit

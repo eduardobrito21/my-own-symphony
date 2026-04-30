@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { IssueId, IssueIdentifier, type Issue } from '../types/index.js';
+import { IssueId, IssueIdentifier, ProjectKey, type Issue } from '../types/index.js';
 
 import { sortForDispatch } from './sort.js';
 
@@ -16,6 +16,7 @@ function makeIssue(
   return {
     id: IssueId(`id-${identifier}`),
     identifier: IssueIdentifier(identifier),
+    projectKey: ProjectKey('default'),
     title: 'title',
     description: null,
     priority: options.priority ?? null,

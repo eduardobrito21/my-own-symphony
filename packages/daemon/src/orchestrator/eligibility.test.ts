@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentConfig, TrackerConfig } from '../config/schema.js';
-import { IssueId, IssueIdentifier, type Issue } from '../types/index.js';
+import type { AgentConfig } from '../config/schema.js';
+import { IssueId, IssueIdentifier, ProjectKey, type Issue } from '../types/index.js';
 
 import { evaluateRuntimeEligibility } from './eligibility.js';
 import { createInitialState, newRunningEntry } from './state.js';
 import { composeSessionId } from '../types/index.js';
 
-function tracker(overrides: Partial<TrackerConfig> = {}): TrackerConfig {
+interface StateNameLists {
+  readonly activeStates: readonly string[];
+  readonly terminalStates: readonly string[];
+}
+
+function tracker(overrides: Partial<StateNameLists> = {}): StateNameLists {
   return {
-    endpoint: 'https://api.linear.app/graphql',
-    active_states: ['Todo', 'In Progress'],
-    terminal_states: ['Done', 'Cancelled'],
+    activeStates: ['Todo', 'In Progress'],
+    terminalStates: ['Done', 'Cancelled'],
     ...overrides,
   };
 }
@@ -33,6 +37,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: IssueId('id-1'),
     identifier: IssueIdentifier('SYMP-1'),
+    projectKey: ProjectKey('default'),
     title: 'title',
     description: null,
     priority: null,
@@ -52,7 +57,7 @@ describe('evaluateRuntimeEligibility', () => {
     const state = createInitialState({ pollIntervalMs: 30_000, maxConcurrentAgents: 10 });
     const result = evaluateRuntimeEligibility(makeIssue(), {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent(),
     });
     expect(result.eligible).toBe(true);
@@ -62,7 +67,7 @@ describe('evaluateRuntimeEligibility', () => {
     const state = createInitialState({ pollIntervalMs: 30_000, maxConcurrentAgents: 10 });
     const result = evaluateRuntimeEligibility(makeIssue({ state: 'Done' }), {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent(),
     });
     expect(result).toEqual({ eligible: false, reason: 'state_terminal' });
@@ -82,7 +87,7 @@ describe('evaluateRuntimeEligibility', () => {
     );
     const result = evaluateRuntimeEligibility(issue, {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent(),
     });
     expect(result).toEqual({ eligible: false, reason: 'already_running' });
@@ -94,7 +99,7 @@ describe('evaluateRuntimeEligibility', () => {
     state.claimed.add(issue.id);
     const result = evaluateRuntimeEligibility(issue, {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent(),
     });
     expect(result).toEqual({ eligible: false, reason: 'already_claimed' });
@@ -113,7 +118,7 @@ describe('evaluateRuntimeEligibility', () => {
     );
     const result = evaluateRuntimeEligibility(makeIssue(), {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent({ max_concurrent_agents: 1 }),
     });
     expect(result).toEqual({ eligible: false, reason: 'no_global_slot' });
@@ -136,7 +141,7 @@ describe('evaluateRuntimeEligibility', () => {
     );
     const result = evaluateRuntimeEligibility(makeIssue({ state: 'Todo' }), {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent({
         max_concurrent_agents: 10,
         // Schema lowercases per-state keys.
@@ -163,7 +168,7 @@ describe('evaluateRuntimeEligibility', () => {
     );
     const result = evaluateRuntimeEligibility(makeIssue({ state: 'In Progress' }), {
       state,
-      tracker: tracker(),
+      ...tracker(),
       agent: agent({
         max_concurrent_agents: 10,
         max_concurrent_agents_by_state: { todo: 1 },

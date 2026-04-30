@@ -25,6 +25,7 @@ function emptyState(): OrchestratorState {
       totalTokens: 0,
       secondsRunning: 0,
     },
+    projects: [],
     agentRateLimits: null,
   };
 }
@@ -160,6 +161,7 @@ describe('serializeState — through the live endpoint', () => {
             issue: {
               id: issueId as unknown as never,
               identifier: 'EDU-1' as unknown as never,
+              projectKey: 'default' as unknown as never,
               title: 'Bump eslint',
               description: 'desc',
               priority: 1,
@@ -201,6 +203,7 @@ describe('serializeState — through the live endpoint', () => {
           {
             issueId: 'iss-2' as unknown as never,
             identifier: 'EDU-2' as unknown as never,
+            projectKey: 'default' as unknown as never,
             attempt: 2,
             // monotonicNow is 0 in the test → dueAtMs of 5000 → due in 5s.
             dueAtMs: 5_000,
@@ -216,6 +219,7 @@ describe('serializeState — through the live endpoint', () => {
         totalTokens: 5_700,
         secondsRunning: 42.5,
       },
+      projects: [],
       agentRateLimits: { remaining: 100 },
     };
 

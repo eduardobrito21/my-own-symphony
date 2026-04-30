@@ -39,6 +39,11 @@ export interface RunningEntryWire {
 export interface IssueWire {
   readonly id: string;
   readonly identifier: string;
+  /** Multi-project (Plan 09c) — sanitized project key the issue
+   *  belongs to. The dashboard partitions running entries by this
+   *  field. Always present; defaults to `"default"` for legacy
+   *  single-project deployments. */
+  readonly projectKey: string;
   readonly title: string;
   readonly description: string | null;
   readonly priority: number | null;
@@ -87,6 +92,18 @@ export interface RetryEntryWire {
 }
 
 /**
+ * Per-project counters for the dashboard's grouping panel.
+ * Mirrors `ProjectSnapshot` from the orchestrator state, projected
+ * onto a wire-friendly shape (string project keys).
+ */
+export interface ProjectSnapshotWire {
+  readonly projectKey: string;
+  readonly running: number;
+  readonly retrying: number;
+  readonly completed: number;
+}
+
+/**
  * Top-level response shape for `GET /api/v1/state`.
  *
  * `now` and `daemonStartedAt` exist so the dashboard can compute
@@ -100,6 +117,10 @@ export interface StateSnapshotWire {
   readonly retryAttempts: readonly RetryEntryWire[];
   readonly completed: readonly string[];
   readonly agentTotals: AgentTotals;
+  /** Multi-project (Plan 09c) — per-project counters in deployment
+   *  YAML order. Empty array for tests that don't set `projectKeys`
+   *  on their `OrchestratorState`. */
+  readonly projects: readonly ProjectSnapshotWire[];
   readonly agentRateLimits: unknown;
   readonly now: string;
   readonly daemonStartedAt: string;
@@ -138,6 +159,12 @@ export function serializeState(args: SerializeArgs): StateSnapshotWire {
     ),
     completed: Array.from(state.completed.values()),
     agentTotals: { ...state.agentTotals },
+    projects: state.projects.map((p) => ({
+      projectKey: p.projectKey,
+      running: p.running,
+      retrying: p.retrying,
+      completed: p.completed,
+    })),
     agentRateLimits: state.agentRateLimits,
     now: args.now.toISOString(),
     daemonStartedAt: args.daemonStartedAt.toISOString(),
@@ -148,6 +175,7 @@ function serializeIssue(issue: Issue): IssueWire {
   return {
     id: issue.id,
     identifier: issue.identifier,
+    projectKey: issue.projectKey,
     title: issue.title,
     description: issue.description,
     priority: issue.priority,
