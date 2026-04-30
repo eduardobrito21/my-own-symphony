@@ -7,15 +7,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ServiceConfig } from '../config/schema.js';
 import { NULL_LOGGER } from '../observability/index.js';
 import { FakeTracker } from '../tracker/fake/fake-tracker.js';
-import { IssueId, IssueIdentifier, type Issue } from '../types/index.js';
+import { IssueId, IssueIdentifier, ProjectKey, type Issue } from '../types/index.js';
 import { WorkspaceManager } from '../workspace/index.js';
 
 import { startupTerminalCleanup } from './startup.js';
+import { defaultProjects } from './test-helpers.js';
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: IssueId('id-1'),
     identifier: IssueIdentifier('SYMP-1'),
+    projectKey: ProjectKey('default'),
     title: 't',
     description: null,
     priority: null,
@@ -64,21 +66,23 @@ describe('startupTerminalCleanup', () => {
   });
 
   it('removes workspaces for issues in terminal states', async () => {
-    // Pre-create a workspace dir for SYMP-1 to simulate leftover.
-    await mkdir(join(root, 'SYMP-1'));
-    expect((await stat(join(root, 'SYMP-1'))).isDirectory()).toBe(true);
+    // Pre-create the project-namespaced workspace dir for SYMP-1
+    // to simulate leftover state across restart. Plan 09c places
+    // workspaces at `<root>/<projectKey>/<id>`.
+    await mkdir(join(root, 'default'), { recursive: true });
+    await mkdir(join(root, 'default', 'SYMP-1'));
+    expect((await stat(join(root, 'default', 'SYMP-1'))).isDirectory()).toBe(true);
 
     const tracker = new FakeTracker([makeIssue({ state: 'Done' })]);
     await startupTerminalCleanup({
-      tracker,
+      projects: defaultProjects(tracker, { terminalStates: CONFIG.tracker.terminal_states }),
       workspaceManager,
-      config: { ...CONFIG, workspace: { root } },
       logger: NULL_LOGGER,
     });
 
     let stillExists = false;
     try {
-      await stat(join(root, 'SYMP-1'));
+      await stat(join(root, 'default', 'SYMP-1'));
       stillExists = true;
     } catch {
       stillExists = false;
@@ -90,9 +94,8 @@ describe('startupTerminalCleanup', () => {
     const tracker = new FakeTracker([]);
     await expect(
       startupTerminalCleanup({
-        tracker,
+        projects: defaultProjects(tracker, { terminalStates: CONFIG.tracker.terminal_states }),
         workspaceManager,
-        config: { ...CONFIG, workspace: { root } },
         logger: NULL_LOGGER,
       }),
     ).resolves.toBeUndefined();
@@ -105,9 +108,8 @@ describe('startupTerminalCleanup', () => {
     ]);
     await expect(
       startupTerminalCleanup({
-        tracker,
+        projects: defaultProjects(tracker, { terminalStates: CONFIG.tracker.terminal_states }),
         workspaceManager,
-        config: { ...CONFIG, workspace: { root } },
         logger: NULL_LOGGER,
       }),
     ).resolves.toBeUndefined();

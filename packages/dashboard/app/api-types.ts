@@ -9,6 +9,10 @@
 export interface IssueWire {
   id: string;
   identifier: string;
+  /** Multi-project (Plan 09c): which Linear project the issue
+   *  belongs to. Defaults to `"default"` for legacy single-project
+   *  deployments. */
+  projectKey: string;
   title: string;
   description: string | null;
   priority: number | null;
@@ -64,6 +68,18 @@ export interface AgentTotalsWire {
   secondsRunning: number;
 }
 
+/**
+ * Per-project counters (Plan 09c). One entry per project the daemon
+ * is watching, in deployment YAML order. Empty array for tests /
+ * single-project legacy deployments.
+ */
+export interface ProjectSnapshotWire {
+  projectKey: string;
+  running: number;
+  retrying: number;
+  completed: number;
+}
+
 export interface StateSnapshotWire {
   pollIntervalMs: number;
   maxConcurrentAgents: number;
@@ -72,6 +88,8 @@ export interface StateSnapshotWire {
   retryAttempts: RetryEntryWire[];
   completed: string[];
   agentTotals: AgentTotalsWire;
+  /** Per-project breakdown for the dashboard's grouping panel. */
+  projects: ProjectSnapshotWire[];
   agentRateLimits: unknown;
   now: string;
   daemonStartedAt: string;

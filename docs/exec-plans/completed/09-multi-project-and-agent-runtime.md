@@ -1,6 +1,6 @@
 # Plan 09 — Multi-project orchestration + ExecutionBackend foundation
 
-- **Status:** 📝 Drafted (Stage 09a complete)
+- **Status:** 📝 Drafted (Stages 09a + 09b + 09c + 09d complete)
 - **Replaces:** the original Plan 09 (Docker + polish, scope was
   too broad), the original Plan 10 (E2B cloud devbox), and the
   prior 09 draft (multi-project + agent-on-host shelling into
@@ -340,6 +340,75 @@ code.
   Stage 09d step 11 rewritten to reflect the pod-side flow.
   Stage 09a code (FakeBackend + tests) updated to match.
   Verification chain re-run: still green.
+
+- **2026-04-30 — Stage 09b complete.** Multi-project config split
+  shipped: `packages/daemon/src/config/deployment.ts` (deployment
+  YAML schema with `polling` / `workspace` / `agent` /
+  `execution` / `hooks` / `projects[]`), `deployment-loader.ts`
+  (`loadDeployment(path)` returning `DeploymentDefinition`),
+  `repo-workflow.ts` (per-repo `workflow.md` schema +
+  `parseRepoWorkflow` + `defaultRepoWorkflow` fallback). Examples:
+  `examples/deployment/symphony.yaml` template + README,
+  `examples/repo-workflow/.symphony/workflow.md` template + README.
+  Tests added: 13 in `deployment.test.ts` (schema validation,
+  multi-project parsing, error paths, example-template parses)
+  and 13 in `repo-workflow.test.ts` (schema, parser front-matter
+  splitting, default fallback). Test count grew from 341 to 367.
+  Verification chain green: typecheck, lint, test (367/367),
+  build, deps:check (11 warnings unchanged). NOT done in 09b
+  (deferred to 09c): wiring the new loader into the composition
+  root, since the orchestrator can't yet consume multi-project —
+  Stage 09c does both as one unit.
+
+- **2026-04-30 — Stage 09c complete.** Multi-project orchestrator
+  shipped end-to-end with `FakeBackend` semantics (the orchestrator
+  itself stays AgentRunner-based — the AgentRunner→ExecutionBackend
+  switch belongs in Plan 10 alongside the real LocalDockerBackend).
+  Type changes: `ProjectKey` branded type + `sanitizeProjectSlug`
+  helper (`packages/daemon/src/types/`); `Issue.projectKey` (every
+  fixture + mock had to gain it, default sentinel `default`);
+  `RetryEntry.projectKey` and optional `RetryEntry.issue` so the
+  retry queue and per-project snapshot can attribute correctly;
+  `OrchestratorState.projects: ProjectSnapshot[]` (counters per
+  project key in deployment YAML order). Orchestrator changes:
+  takes `projects: ProjectContextMap` instead of `tracker: Tracker`;
+  per-tick iterates trackers and stamps `projectKey` after fetch;
+  `reconcile` groups running IDs by project and fans out to
+  per-project trackers in parallel (per-project failure is local —
+  one slow project does not stall the rest); `startupTerminalCleanup`
+  follows the same fan-out pattern; `handleRetryFire` uses the
+  retry's stamped projectKey to pick the right tracker.
+  Workspace path becomes `<root>/<projectKey>/<id>/`; `WorkspaceManager`
+  methods accept a `ProjectKey | null` (null = legacy flat layout).
+  HTTP wire format gains `IssueWire.projectKey` + a top-level
+  `projects: ProjectSnapshotWire[]` array. Dashboard adds a
+  Projects panel (collapsed when only one project) and tags
+  running rows with the project badge in multi-project mode.
+  Composition root in `index.ts` synthesizes a one-entry
+  `ProjectContextMap` via `singleProjectContext` for the legacy
+  positional `pnpm symphony WORKFLOW.md` path — no behavior change
+  for existing users. Multi-project YAML wiring (loading
+  `symphony.yaml` at startup and constructing N trackers) is
+  deferred to Plan 10 alongside the pod runtime, since per-repo
+  `workflow.md` rendering is a pod responsibility per ADR 0011.
+
+- **2026-04-30 — Stage 09d complete.** New tests in
+  `packages/daemon/src/orchestrator/orchestrator-plan09c.test.ts`
+  (6 tests, all passing): two-project dispatch in one tick;
+  `projectKey` stamping per tracker; project-namespaced
+  workspace paths on disk (verified via `stat`); per-project
+  snapshot `projects[]` with deployment-order entries; one
+  failing tracker does not stall siblings; reconcile terminates
+  on per-project terminal-state. Existing test suite updated to
+  the new orchestrator constructor shape via a small
+  `test-helpers.ts` (`defaultProjects(tracker)` synthesizes a
+  one-entry map). 6 new tests landed; total grew from 367 to
+  373; all green. Docs: `docs/product-specs/deviations.md` §5
+  / §11.2 entry updated to "Shipped (foundation) as of Plan 09
+  stage 09c"; example YAML / repo-workflow templates from 09b
+  remain canonical. Verification chain green: typecheck, lint,
+  test (373/373), build, deps:check (11 warnings, baseline +
+  `execution/errors.ts` from 09a — no new orphans).
 
 - **2026-04-30 — Plan 09 split into four plans.** Original Plan 09
   ("multi-project + agent runtime + idempotency + PR demo") was

@@ -5,7 +5,7 @@
 // is replaced with `_` to keep the path safe. This is invariant 3 from
 // SPEC §15.2 and is enforced before workspace creation.
 
-import { WorkspaceKey, type IssueIdentifier } from './ids.js';
+import { ProjectKey, WorkspaceKey, type IssueIdentifier } from './ids.js';
 
 const UNSAFE_CHAR = /[^A-Za-z0-9._-]/g;
 
@@ -24,4 +24,20 @@ export function sanitizeIdentifier(identifier: IssueIdentifier): WorkspaceKey {
   // unless the input was empty, which `IssueIdentifier`'s constructor
   // already rejects upstream.
   return WorkspaceKey(sanitized);
+}
+
+/**
+ * Convert a Linear project slug (or any operator-supplied project
+ * label) into a filesystem-safe `ProjectKey`. Same character-set
+ * rules as `sanitizeIdentifier`. ADR 0009.
+ *
+ * Throws if the input would sanitize to the empty string (e.g. all
+ * characters were unsafe and there's nothing left).
+ */
+export function sanitizeProjectSlug(slug: string): ProjectKey {
+  if (slug === '') {
+    throw new Error('sanitizeProjectSlug: input must be non-empty.');
+  }
+  const sanitized = slug.replace(UNSAFE_CHAR, '_');
+  return ProjectKey(sanitized);
 }

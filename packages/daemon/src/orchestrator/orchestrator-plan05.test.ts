@@ -23,9 +23,10 @@ import { MockAgent } from '../agent/mock/mock-agent.js';
 import type { ServiceConfig, WorkflowDefinition } from '../config/schema.js';
 import { NULL_LOGGER } from '../observability/index.js';
 import { FakeTracker } from '../tracker/fake/fake-tracker.js';
-import { IssueId, IssueIdentifier, type Issue } from '../types/index.js';
+import { IssueId, IssueIdentifier, ProjectKey, type Issue } from '../types/index.js';
 import { WorkspaceManager } from '../workspace/index.js';
 
+import { defaultProjects } from './test-helpers.js';
 import { Orchestrator, type TimerSchedule } from './orchestrator.js';
 
 // ---- Test infrastructure ---------------------------------------------
@@ -84,6 +85,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: IssueId('id-1'),
     identifier: IssueIdentifier('SYMP-1'),
+    projectKey: ProjectKey('default'),
     title: 'Do the thing',
     description: null,
     priority: 1,
@@ -144,7 +146,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'work on {{ issue.identifier }}',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,
@@ -181,7 +183,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'x',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,
@@ -214,7 +216,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'work on {{ issue.identifier }}',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,
@@ -251,7 +253,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'x',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,
@@ -291,7 +293,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'x',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,
@@ -343,7 +345,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'x',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,
@@ -379,7 +381,7 @@ describe('Orchestrator (Plan 05)', () => {
       const orchestrator = new Orchestrator({
         config,
         promptTemplateSource: 'x',
-        tracker,
+        projects: defaultProjects(tracker),
         workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
         agent,
         logger: NULL_LOGGER,

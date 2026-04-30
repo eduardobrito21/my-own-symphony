@@ -15,6 +15,8 @@ import type {
   IssueId,
   LiveSession,
   OrchestratorState,
+  ProjectKey,
+  ProjectSnapshot,
   RetryEntry,
   RunningEntry,
   SessionId,
@@ -30,6 +32,17 @@ export interface MutableOrchestratorState {
   completed: Set<IssueId>;
   agentTotals: MutableAgentTotals;
   agentRateLimits: unknown;
+  /**
+   * Stable list of project keys the daemon is watching, in the
+   * order they appear in `symphony.yaml` (or a single synthetic
+   * `default` entry for legacy WORKFLOW.md compat mode).
+   *
+   * The orchestrator iterates this list per tick to fetch
+   * candidates from each tracker. Snapshot uses it to project the
+   * per-project counters (`ProjectSnapshot[]`) in deterministic
+   * order so the dashboard doesn't reshuffle.
+   */
+  projectKeys: readonly ProjectKey[];
 }
 
 export interface MutableRunningEntry {
@@ -68,6 +81,10 @@ export interface MutableAgentTotals {
 export function createInitialState(args: {
   readonly pollIntervalMs: number;
   readonly maxConcurrentAgents: number;
+  /** Multi-project (Plan 09c). Defaults to `[]` so legacy
+   *  single-project tests don't have to spell it out — they just
+   *  see an empty `projects` array in their snapshots. */
+  readonly projectKeys?: readonly ProjectKey[];
 }): MutableOrchestratorState {
   return {
     pollIntervalMs: args.pollIntervalMs,
@@ -83,6 +100,7 @@ export function createInitialState(args: {
       secondsRunning: 0,
     },
     agentRateLimits: null,
+    projectKeys: args.projectKeys ?? [],
   };
 }
 
@@ -142,7 +160,38 @@ export function snapshotState(state: MutableOrchestratorState): OrchestratorStat
     completed: new Set(state.completed),
     agentTotals: { ...state.agentTotals } satisfies AgentTotals,
     agentRateLimits: state.agentRateLimits,
+    projects: projectSnapshots(state),
   };
+}
+
+/**
+ * Project the per-project counters in `projectKeys` order. Issues
+ * whose `projectKey` is not in `projectKeys` are silently dropped
+ * from the breakdown — this is defensive (the orchestrator should
+ * never see such an issue) and surfaces as "missing from snapshot"
+ * rather than crashing.
+ */
+function projectSnapshots(state: MutableOrchestratorState): readonly ProjectSnapshot[] {
+  const counts = new Map<ProjectKey, { running: number; retrying: number; completed: number }>();
+  for (const key of state.projectKeys) {
+    counts.set(key, { running: 0, retrying: 0, completed: 0 });
+  }
+  for (const entry of state.running.values()) {
+    const c = counts.get(entry.issue.projectKey);
+    if (c !== undefined) c.running += 1;
+  }
+  for (const entry of state.retryAttempts.values()) {
+    const c = counts.get(entry.projectKey);
+    if (c !== undefined) c.retrying += 1;
+  }
+  // `completed` holds only IssueIds, not full Issues — we don't have
+  // per-issue project membership for completed runs. Counter is left
+  // at 0 for now; if a future plan wants accurate per-project completed
+  // counts, the `completed` set can grow into a `Map<IssueId, ProjectKey>`.
+  return state.projectKeys.map((projectKey) => {
+    const c = counts.get(projectKey) ?? { running: 0, retrying: 0, completed: 0 };
+    return { projectKey, running: c.running, retrying: c.retrying, completed: c.completed };
+  });
 }
 
 function toReadonlyRunningEntry(entry: MutableRunningEntry): RunningEntry {

@@ -22,9 +22,10 @@ import type { AgentEvent, AgentRunInput, AgentRunner } from '../agent/runner.js'
 import type { ServiceConfig } from '../config/schema.js';
 import { NULL_LOGGER } from '../observability/index.js';
 import { FakeTracker } from '../tracker/fake/fake-tracker.js';
-import { IssueId, IssueIdentifier, SessionId, type Issue } from '../types/index.js';
+import { IssueId, IssueIdentifier, ProjectKey, SessionId, type Issue } from '../types/index.js';
 import { WorkspaceManager } from '../workspace/index.js';
 
+import { defaultProjects } from './test-helpers.js';
 import { Orchestrator, type TimerSchedule } from './orchestrator.js';
 
 const NEVER_FIRING_SCHEDULE: TimerSchedule = {
@@ -64,6 +65,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
     id: IssueId('id-evt'),
     identifier: IssueIdentifier('SYMP-EVT'),
+    projectKey: ProjectKey('default'),
     title: 'Event-test issue',
     description: null,
     priority: null,
@@ -159,7 +161,7 @@ describe('Orchestrator — Plan 07 event handling', () => {
     return new Orchestrator({
       config,
       promptTemplateSource: 'work on {{ issue.identifier }}',
-      tracker: new FakeTracker([options.issue ?? makeIssue()]),
+      projects: defaultProjects(new FakeTracker([options.issue ?? makeIssue()])),
       workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
       agent: new ScriptedAgent(events),
       logger: NULL_LOGGER,

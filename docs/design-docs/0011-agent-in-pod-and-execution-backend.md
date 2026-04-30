@@ -356,10 +356,10 @@ contain. Rejected.
 - The pod takes one extra Linear round trip on startup vs the
   serialize-into-task.json design (~50–200ms). Negligible relative
   to a typical multi-minute agent turn; called out for completeness.
-- Workspace path mirroring becomes a real concern in Plan 10: when
+- Workspace path mirroring becomes a real concern in Plan 13: when
   the daemon-in-container spawns sibling pods, the `-v` flag must
   use HOST paths, not in-container paths. Surfaced as an open
-  question in Plan 10.
+  question in Plan 13.
 
 **Constrained:**
 
@@ -469,7 +469,7 @@ env vars on the pod, not in the envelope.
 ## Schedule
 
 This decision is implemented in
-[Plan 09](../exec-plans/active/09-multi-project-and-agent-runtime.md),
+[Plan 09](../exec-plans/completed/09-multi-project-and-agent-runtime.md),
 specifically stages 09c (interface + LocalDockerBackend) and 09d
 (agent-runtime entrypoint + base image).
 

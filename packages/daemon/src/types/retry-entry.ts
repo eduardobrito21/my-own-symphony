@@ -4,7 +4,8 @@
 // rather than wall-clock, because retries must keep firing correctly
 // across system clock changes (NTP adjustments, daylight saving).
 
-import type { IssueId, IssueIdentifier } from './ids.js';
+import type { Issue } from './issue.js';
+import type { IssueId, IssueIdentifier, ProjectKey } from './ids.js';
 
 export interface RetryEntry {
   readonly issueId: IssueId;
@@ -14,6 +15,24 @@ export interface RetryEntry {
    * may persist briefly after the issue is no longer fetchable.
    */
   readonly identifier: IssueIdentifier;
+  /**
+   * Multi-project (Plan 09c): which project this retry belongs to,
+   * so `handleRetryFire` knows which tracker to re-query for the
+   * issue. The snapshot also uses this to attribute retries to
+   * the correct project counter.
+   */
+  readonly projectKey: ProjectKey;
+  /**
+   * Snapshot of the issue at the moment the retry was scheduled.
+   * Used by `handleRetryFire` to compute project-key-aware
+   * snapshots (`projectSnapshots` aggregates `retryAttempts` by
+   * `entry.issue.projectKey`).
+   *
+   * Optional for back-compat with retry-entries created by code
+   * paths that don't carry the issue (older callers); when
+   * undefined, snapshot attribution falls back to projectKey above.
+   */
+  readonly issue?: Issue;
   /** 1-based retry attempt counter. */
   readonly attempt: number;
   /** Monotonic clock timestamp (ms). */
