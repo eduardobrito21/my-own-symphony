@@ -74,11 +74,16 @@ Optional per-project fields:
 | `repo.workflow_path` | `.symphony/workflow.md` | The repo keeps its workflow in a non-default location |
 | `repo.branch_prefix` | `symphony/`             | You want per-issue branches to use a different prefix |
 
-## Compatibility with the legacy `WORKFLOW.md`
+## The legacy `WORKFLOW.md` flow is gone
 
-If you're upgrading from a single-`WORKFLOW.md` setup
-(`pnpm symphony path/to/WORKFLOW.md`), that command still works. The
-daemon detects the legacy invocation and synthesizes a one-project
-deployment in memory. To migrate, write a `symphony.yaml` whose
-single `projects:` entry mirrors your existing `WORKFLOW.md`'s
-`tracker.project_slug` + your repo URL.
+Earlier versions of Symphony accepted a single
+`pnpm symphony path/to/WORKFLOW.md` invocation. That path was removed
+in the Plan 10 consolidation (decision log entry "2026-04-30
+(afternoon) — Legacy `WORKFLOW.md` pipeline removed"). The only
+supported invocation is now `pnpm symphony [path/to/symphony.yaml]`
+(defaults to `./symphony.yaml`).
+
+To migrate an old `WORKFLOW.md`, write a one-project `symphony.yaml`:
+the legacy `tracker.project_slug` becomes `projects[0].linear.project_slug`,
+and the agent's working repo becomes `projects[0].repo.url`. If you ran
+`agent.kind: claude` in-process, set `execution.backend: in-process`.

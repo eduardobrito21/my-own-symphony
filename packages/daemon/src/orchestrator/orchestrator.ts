@@ -10,7 +10,7 @@
 
 import { parsePromptTemplate, renderPrompt } from '../agent/prompt.js';
 import type { AgentEvent, AgentRunner } from '../agent/runner.js';
-import type { ServiceConfig, WorkflowDefinition } from '../config/schema.js';
+import type { ServiceConfig } from '../config/schema.js';
 import type { Logger } from '../observability/index.js';
 import { sortForDispatch } from '../tracker/sort.js';
 import {
@@ -82,9 +82,8 @@ export class Orchestrator {
   private readonly now: () => Date;
   private readonly monotonicNow: () => number;
 
-  // Mutable so `applyWorkflow` (Plan 05 dynamic reload) can swap them.
-  private config: ServiceConfig;
-  private parsedTemplate: ReturnType<typeof parsePromptTemplate>;
+  private readonly config: ServiceConfig;
+  private readonly parsedTemplate: ReturnType<typeof parsePromptTemplate>;
 
   /** In-flight workers, keyed by issue id. Resolves when the worker exits. */
   private readonly workers = new Map<IssueId, Promise<void>>();
@@ -297,42 +296,6 @@ export class Orchestrator {
         this.scheduleNextTick(this.state.pollIntervalMs);
       }
     }
-  }
-
-  // ---- Dynamic reload --------------------------------------------------
-
-  /**
-   * Apply a freshly-loaded `WorkflowDefinition`. Called by the file
-   * watcher (Plan 05) when `WORKFLOW.md` changes. SPEC §6.2:
-   *   - re-apply config and prompt template without restart
-   *   - apply to FUTURE dispatch decisions; in-flight runs keep
-   *     their original values
-   *   - poll interval / concurrency change is reflected on the next
-   *     tick
-   */
-  async applyWorkflow(def: WorkflowDefinition): Promise<void> {
-    await this.lock.run(() => {
-      const prevPollMs = this.state.pollIntervalMs;
-      this.config = def.config;
-      this.parsedTemplate = parsePromptTemplate(def.promptTemplate);
-      this.state.pollIntervalMs = def.config.polling.interval_ms;
-      this.state.maxConcurrentAgents = def.config.agent.max_concurrent_agents;
-      this.workspaceManager.setHooks(def.config.hooks);
-
-      this.logger.info('workflow reloaded', {
-        poll_interval_ms: this.state.pollIntervalMs,
-        max_concurrent_agents: this.state.maxConcurrentAgents,
-        prompt_parsed: this.parsedTemplate.ok,
-      });
-
-      // If the poll interval changed and we have a tick scheduled,
-      // reschedule with the new interval so changes apply faster.
-      if (this.tickHandle !== null && this.state.pollIntervalMs !== prevPollMs && !this.stopped) {
-        this.schedule.clearTimeout(this.tickHandle);
-        this.tickHandle = null;
-        this.scheduleNextTick(this.state.pollIntervalMs);
-      }
-    });
   }
 
   // ---- Dispatch / worker lifecycle -------------------------------------

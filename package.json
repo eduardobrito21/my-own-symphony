@@ -20,7 +20,8 @@
     "typecheck": "tsc --build --pretty",
     "symphony": "node --env-file=.env packages/daemon/dist/index.js",
     "dashboard": "pnpm --filter @symphony/dashboard dev",
-    "dashboard:build": "pnpm --filter @symphony/dashboard build"
+    "dashboard:build": "pnpm --filter @symphony/dashboard build",
+    "docker:build:agent-base": "pnpm --filter @symphony/types --filter @symphony/daemon --filter @symphony/agent-runtime build && docker build -f docker/agent-base.Dockerfile -t symphony/agent-base:1 ."
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
