@@ -34,3 +34,4 @@ Filenames are `NNNN-kebab-case-summary.md`, four-digit zero-padded.
 | [0009](0009-multi-project-orchestration.md)        | Multi-project orchestration (deviation from spec's single-project)     | Accepted |
 | [0010](0010-co-located-http-is-provisional.md)     | Co-located HTTP server is provisional; split in Plan 10                | Accepted |
 | [0011](0011-agent-in-pod-and-execution-backend.md) | Agent runs inside the per-task pod; ExecutionBackend is the seam       | Accepted |
+| [0012](0012-namespace-as-production-execution-backend.md) | Namespace as the v1 production ExecutionBackend                        | Proposed |
