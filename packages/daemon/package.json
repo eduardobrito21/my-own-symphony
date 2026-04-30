@@ -8,6 +8,48 @@
   "bin": {
     "symphony": "./dist/index.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./agent/claude": {
+      "types": "./dist/agent/claude/agent.d.ts",
+      "default": "./dist/agent/claude/agent.js"
+    },
+    "./agent/linear-skill": {
+      "types": "./dist/agent/claude/linear-skill-loader.d.ts",
+      "default": "./dist/agent/claude/linear-skill-loader.js"
+    },
+    "./agent/runner": {
+      "types": "./dist/agent/runner.d.ts",
+      "default": "./dist/agent/runner.js"
+    },
+    "./agent/prompt": {
+      "types": "./dist/agent/prompt.d.ts",
+      "default": "./dist/agent/prompt.js"
+    },
+    "./tracker/linear": {
+      "types": "./dist/tracker/linear/index.d.ts",
+      "default": "./dist/tracker/linear/index.js"
+    },
+    "./config/repo-workflow": {
+      "types": "./dist/config/repo-workflow.d.ts",
+      "default": "./dist/config/repo-workflow.js"
+    },
+    "./execution": {
+      "types": "./dist/execution/index.d.ts",
+      "default": "./dist/execution/index.js"
+    },
+    "./observability": {
+      "types": "./dist/observability/index.d.ts",
+      "default": "./dist/observability/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "default": "./dist/types/index.js"
+    }
+  },
   "files": [
     "dist"
   ],

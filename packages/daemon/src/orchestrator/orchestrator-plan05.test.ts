@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MockAgent } from '../agent/mock/mock-agent.js';
-import type { ServiceConfig, WorkflowDefinition } from '../config/schema.js';
+import type { ServiceConfig } from '../config/schema.js';
 import { NULL_LOGGER } from '../observability/index.js';
 import { FakeTracker } from '../tracker/fake/fake-tracker.js';
 import { IssueId, IssueIdentifier, ProjectKey, type Issue } from '../types/index.js';
@@ -325,85 +325,8 @@ describe('Orchestrator (Plan 05)', () => {
     });
   });
 
-  describe('applyWorkflow (dynamic reload)', () => {
-    function buildDef(over: Partial<ServiceConfig> = {}): WorkflowDefinition {
-      return {
-        config: buildConfig(over),
-        promptTemplate: 'work on {{ issue.identifier }}',
-        path: '/tmp/fake-workflow.md',
-      };
-    }
-
-    it('updates the live poll interval and reschedules the next tick', async () => {
-      const tracker = new FakeTracker([]);
-      const agent = new MockAgent();
-      const config = buildConfig({
-        workspace: { root: workspaceRoot },
-        polling: { interval_ms: 30_000 },
-      });
-      const schedule = controlledSchedule();
-      const orchestrator = new Orchestrator({
-        config,
-        promptTemplateSource: 'x',
-        projects: defaultProjects(tracker),
-        workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
-        agent,
-        logger: NULL_LOGGER,
-        schedule,
-      });
-
-      // Confirm the initial config is in effect.
-      expect(orchestrator.snapshot().pollIntervalMs).toBe(30_000);
-
-      // Reload to a tighter interval. We don't run start()
-      // because that would race with the test's tick assertions —
-      // the rescheduling-on-pending-timer path is exercised in the
-      // live smoke test.
-      await orchestrator.applyWorkflow(buildDef({ polling: { interval_ms: 5_000 } }));
-
-      expect(orchestrator.snapshot().pollIntervalMs).toBe(5_000);
-
-      await orchestrator.stop();
-    });
-
-    it('updates max_concurrent_agents so the next tick uses the new cap', async () => {
-      const tracker = new FakeTracker([
-        makeIssue({ id: IssueId('a'), identifier: IssueIdentifier('SYMP-A') }),
-        makeIssue({ id: IssueId('b'), identifier: IssueIdentifier('SYMP-B') }),
-        makeIssue({ id: IssueId('c'), identifier: IssueIdentifier('SYMP-C') }),
-      ]);
-      const agent = new MockAgent({ turnDurationMs: 5_000 });
-      const config = buildConfig({
-        workspace: { root: workspaceRoot },
-        agent: { ...buildConfig().agent, max_concurrent_agents: 1 },
-      });
-      const schedule = controlledSchedule();
-      const orchestrator = new Orchestrator({
-        config,
-        promptTemplateSource: 'x',
-        projects: defaultProjects(tracker),
-        workspaceManager: new WorkspaceManager({ root: workspaceRoot, hooks: config.hooks }),
-        agent,
-        logger: NULL_LOGGER,
-        schedule,
-      });
-
-      await orchestrator.tick();
-      expect(orchestrator.snapshot().running.size).toBe(1);
-
-      // Reload bumping the cap to 3.
-      await orchestrator.applyWorkflow(
-        buildDef({
-          agent: { ...buildConfig().agent, max_concurrent_agents: 3 },
-        }),
-      );
-      expect(orchestrator.snapshot().maxConcurrentAgents).toBe(3);
-
-      // Next tick should pick up the other two.
-      await orchestrator.tick();
-      expect(orchestrator.snapshot().running.size).toBe(3);
-
-      await orchestrator.stop();
-    });
-  });
+  // The `applyWorkflow` (dynamic reload) tests were removed when
+  // the legacy `WORKFLOW.md` pipeline was retired in the Plan 10
+  // consolidation. Reload of `symphony.yaml` is a separate future
+  // concern; the orchestrator no longer exposes the hook.
 });

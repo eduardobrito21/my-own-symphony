@@ -1,0 +1,27 @@
+{
+  "name": "@symphony/agent-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Symphony in-pod agent runtime — runs INSIDE the per-issue Docker pod that LocalDockerBackend starts. Reads /etc/symphony/dispatch.json, fetches the issue from Linear, clones the repo, renders the per-repo workflow.md, and drives the Claude Agent SDK. Streams AgentEvents back to the host daemon over a Unix socket bind-mounted at /var/run/symphony/events.sock. Per ADR 0011 + Plan 10. The build artifact (dist/entrypoint.js) is what the docker base image ENTRYPOINT executes.",
+  "main": "./dist/entrypoint.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "tsc --build tsconfig.build.json --clean && rm -rf dist",
+    "dev": "tsx src/entrypoint.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.123",
+    "@symphony/daemon": "workspace:*",
+    "@symphony/types": "workspace:*",
+    "liquidjs": "^10.20.1",
+    "yaml": "^2.6.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

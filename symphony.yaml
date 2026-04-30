@@ -1,0 +1,60 @@
+# Symphony deployment config — Plan 10 smoke test.
+#
+# This file is operator-owned (per ADR 0009). It tells the daemon
+# which Linear projects to watch and which Docker pod to dispatch
+# their issues to. The per-repo workflow definition (prompt, hooks,
+# allowed_tools) lives at <repo>/.symphony/workflow.md and is read
+# by the in-pod agent runtime after the clone.
+#
+# Run with: pnpm symphony symphony.yaml
+
+polling:
+  interval_ms: 30000
+
+workspace:
+  # Per-issue workspaces land at <root>/<projectKey>/<issueIdentifier>/
+  # The pod bind-mounts the per-issue dir at /workspace.
+  root: ./.symphony-workspaces
+
+agent:
+  # Operator-side defaults. Per-repo workflow.md may override
+  # `model` / budgets; daemon-wide caps (concurrency, timeouts)
+  # are NOT overridable per-repo.
+  model: claude-sonnet-4-6
+  max_concurrent_agents: 2
+  max_turns: 20
+  max_budget_usd: 1.0
+  # Disable stall detection for the smoke — first run may be slow
+  # (image cold-start + clone + npm setup).
+  stall_timeout_ms: 0
+
+execution:
+  # Where the agent process runs:
+  #   - local-docker: per-issue Docker pod (Plan 10 / ADR 0011).
+  #     Production target. Requires `pnpm docker:build:agent-base`
+  #     to have run first.
+  #   - in-process: the daemon constructs ClaudeAgent and runs it
+  #     in its own process. No docker, no isolation. Faster
+  #     iteration locally; useful when you don't want the
+  #     image-build cycle.
+  backend: local-docker
+  base_image: symphony/agent-base:1
+
+hooks:
+  timeout_ms: 60000
+
+projects:
+  - linear:
+      # "Smoke Test" project on the EDU team. Pulled from
+      # `pnpm tsx scripts/list-linear-projects.mjs` (slug is the
+      # value after `/project/` in the Linear URL).
+      project_slug: a532c6a9e9bb
+      active_states: [Todo, 'In Progress']
+      terminal_states: [Done, Cancelled, Canceled, Duplicate]
+    repo:
+      # HTTPS so the pod can clone without SSH keys. Repo must be
+      # public OR the pod must have GITHUB_TOKEN with read access.
+      url: https://github.com/eduardobrito21/my-own-symphony-test.git
+      default_branch: main
+      workflow_path: .symphony/workflow.md
+      branch_prefix: symphony/

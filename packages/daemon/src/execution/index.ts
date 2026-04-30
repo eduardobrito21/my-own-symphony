@@ -26,3 +26,18 @@ export {
 } from './errors.js';
 
 export { FakeBackend, type BackendCall, type ImageOverride, type PodScenario } from './fake.js';
+
+export {
+  LocalDockerBackend,
+  buildDispatchEnvelope,
+  bindEventSocket,
+  EventSocketServer,
+  defaultDockerRunner,
+  perProjectTag,
+  resolveImage,
+  type DockerResult,
+  type DockerRunner,
+  type LocalDockerBackendArgs,
+  type ResolveImageArgs,
+  type SocketServerArgs,
+} from './local-docker/index.js';

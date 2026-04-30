@@ -272,15 +272,3 @@ export type PollingConfig = ServiceConfig['polling'];
 export type WorkspaceConfig = ServiceConfig['workspace'];
 export type HooksConfig = ServiceConfig['hooks'];
 export type AgentConfig = ServiceConfig['agent'];
-
-/**
- * The workflow definition returned by the loader: the typed config plus the
- * raw prompt template. Prompt rendering is Plan 02; here the template is an
- * opaque string we hand off downstream.
- */
-export interface WorkflowDefinition {
-  readonly config: ServiceConfig;
-  readonly promptTemplate: string;
-  /** Absolute path to the workflow file that produced this definition. */
-  readonly path: string;
-}
