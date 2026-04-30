@@ -1,6 +1,6 @@
 # Plan 10 — Agent-in-pod runtime + LocalDockerBackend
 
-- **Status:** 📝 Drafted
+- **Status:** ✅ Complete — smoke verified end-to-end on 2026-04-30 (one Linear issue, full docker pod path, ~12s + $0.035 / turn).
 - **Extracted from:** original Plan 09 stage 09d. Split out as
   its own plan so the pod runtime can be built and verified
   independently from the multi-project foundation (Plan 09 ships
@@ -370,4 +370,157 @@ version` + image tag bump). Separate repo only if/when third
 
 ## Decision log
 
-(empty — populated as the plan executes)
+### 2026-04-30 (evening) — Stage 11e smoke run: PASS
+
+End-to-end validation of the full docker pod path. One Linear issue
+(EDU-9 in the `Smoke Test` project, slug `a532c6a9e9bb`) dispatched
+through `LocalDockerBackend` against
+`https://github.com/eduardobrito21/my-own-symphony-test.git` (its
+`.symphony/workflow.md`: post a `hello from the pod 👋` comment +
+transition to `Done`).
+
+Result: 12 seconds end-to-end, $0.035 (Sonnet 4.6, cache hit on
+turn 2). Pod went `Todo → In Progress` (handshake) → `Done` (agent),
+comment landed. `worker_exit reason=normal`. Plan 10 satisfied
+verbatim: "the pod runs and posts a 'hello from the pod' comment to
+the Linear issue."
+
+**Five blockers resolved en route to the green run, all worth
+recording:**
+
+1. **`pnpm deploy` errored on pnpm v10**: needed `--legacy` flag.
+   pnpm 10 changed `deploy` to demand `inject-workspace-packages=true`
+   by default; we don't need injected deps for the runtime image.
+2. **`groupadd --gid 1000` clash**: `node:20-bookworm-slim` already
+   ships a `node` user at uid 1000. Reused it instead of recreating.
+3. **macOS Unix-socket path > 104 chars**: `$TMPDIR` (`/var/folders/...`)
+   plus the per-pod subdir + UUID exceeded the kernel limit, surfacing
+   as misleading `EADDRINUSE`. Switched to `~/.symphony-pods/<sha256-hash>.sock`
+   (host shares `$HOME` with Docker by default; hash gives short stable
+   names).
+4. **Docker Desktop / VirtioFS doesn't pass live AF_UNIX sockets
+   through bind mounts** on macOS. The mounted socket file appears in
+   the pod but `connect()` fails with `EACCES`. **Switched the daemon ↔
+   pod transport from Unix socket to TCP loopback** on
+   `127.0.0.1:<random-port>`; pod connects via `host.docker.internal:<port>`
+   (we wire `--add-host=host.docker.internal:host-gateway` for Linux
+   parity). This is now the v1 wire format — Unix socket support is
+   not coming back.
+5. **SDK's libc detection picked musl on glibc bookworm**: the Claude
+   Agent SDK's binary resolver tries `*-linux-<arch>-musl` first and
+   only falls through to glibc if the musl package isn't installed.
+   Both packages were present, so the SDK picked musl, then the
+   kernel reported the binary as "not found" because `/lib/ld-musl-*`
+   doesn't exist on bookworm. Fix: post-`pnpm deploy` step in the
+   Dockerfile deletes the musl variants from the deploy tree, forcing
+   fall-through to glibc.
+
+These five are all encoded in code+comments in this PR. None of them
+will recur unless the `Dockerfile` regresses — they're now mechanical.
+
+### 2026-04-30 (afternoon) — Legacy `WORKFLOW.md` pipeline removed; `execution.backend: in-process` added
+
+Driven by user feedback during smoke-prep: "before starting, remove the
+legacy workflow.md pipeline. From now on, only 1 workflow, locally,
+equals symphony.yaml with only one routine, the basic case."
+
+Removed:
+
+- `packages/daemon/src/config/loader.ts` — loaded WORKFLOW.md.
+- `packages/daemon/src/config/watch.ts` — watched WORKFLOW.md for
+  dynamic reload.
+- `packages/daemon/src/config/loader.test.ts`,
+  `packages/daemon/src/config/watch.test.ts`.
+- `examples/linear/WORKFLOW.md`, `examples/fake/WORKFLOW.md`,
+  `examples/linear/README.md` (whole `examples/linear/` dir).
+- `Orchestrator.applyWorkflow` method and the
+  `WorkflowDefinition` type.
+- The `applyWorkflow` describe block in
+  `orchestrator-plan05.test.ts` (the `Plan 05 dynamic-reload`
+  feature ships nothing user-visible without the watcher).
+
+Added:
+
+- `execution.backend: in-process` as a third option (alongside
+  `local-docker` and the still-internal `fake`-via-FakeBackend).
+  When selected, the daemon constructs `ClaudeAgent` directly and
+  runs it in its own process — no docker. This collapses what was
+  the legacy "ClaudeAgent in daemon process" path into the
+  `symphony.yaml`-driven composition root.
+- The `local-docker` enum value remains the default; the
+  user-visible choice now lives in one file (`symphony.yaml`)
+  instead of being split between `WORKFLOW.md`'s `agent.kind` and
+  `symphony.yaml`'s `execution.backend`.
+
+Net effect: there's exactly one entrypoint shape. `pnpm symphony`
+defaults to `./symphony.yaml`; the `argv[2]` extension dispatch
+is gone. The `runLegacy()` function and its helpers
+(`maybeBuildLinearClient`, `buildTracker`, `buildAgent`,
+`buildLinearTracker`, `buildFakeTracker`) are deleted —
+`buildAgent()` survives but is now `(deployment, ...) => AgentRunner`,
+selecting `ClaudeAgent` (in-process) or `BackendAgentRunner`
+(local-docker) per `execution.backend`.
+
+`config/schema.ts` and the `ServiceConfig` type stay — they're now
+internal-only, used to feed the orchestrator (which hasn't been
+refactored to take `DeploymentConfig` directly). Synthesis happens
+in `index.ts`. A future plan can flatten this if it becomes a
+genuine pain point.
+
+### 2026-04-30 (morning) — Stage 11a–11d landed; smoke (11e) deferred
+
+What shipped:
+
+- New `packages/agent-runtime/` workspace package — entrypoint shim
+  (`src/entrypoint.ts`), dispatch envelope zod schema
+  (`src/dispatch-envelope.ts`), JSON-line socket writer
+  (`src/socket-writer.ts`), and a small Linear helper for the
+  eligibility-check + dispatch-handshake (`src/linear-helper.ts`).
+- `docker/agent-base.Dockerfile` (multi-stage build) and
+  `pnpm docker:build:agent-base` script in the root `package.json`.
+- `LocalDockerBackend` at
+  `packages/daemon/src/execution/local-docker/`, with image resolution
+  honoring all four sources (explicit tag → `.symphony/agent.dockerfile`
+  → `.devcontainer/Dockerfile` → base fallback) and `start` /
+  `stop` / `logsTail`.
+- Per-pod Unix socket protocol — `bindEventSocket` on the daemon side
+  yields `AsyncIterable<AgentEvent>`; the in-pod `EventSocketWriter`
+  writes JSON-line events at the other end. Tests cover the round
+  trip with a real socket pair (no docker needed).
+- `BackendAgentRunner` adapter at `packages/daemon/src/agent/backend/`
+  — implements the existing `AgentRunner` interface in terms of an
+  `ExecutionBackend`. Lets the orchestrator use the pod runtime
+  without rewriting every existing `MockAgent`-based test. The full
+  orchestrator → `ExecutionBackend.start(...)` cutover is a Plan 11
+  follow-up.
+- Tests: image resolver (every branch), LocalDockerBackend (mocked
+  `docker` runner + a real Unix socket round trip), dispatch envelope
+  schema, backend adapter (using `FakeBackend`).
+- ARCHITECTURE.md and SECURITY.md updated to cover the
+  `agent-runtime` package, the `execution/local-docker/` subdir,
+  and the `GITHUB_TOKEN` plumbing into pods.
+
+What's deferred:
+
+- **Stage 11e smoke run.** Requires a host with docker installed +
+  a Linear test project + a test repo; not done in this CI-only
+  iteration. The Dockerfile, build script, and runtime contract are
+  all in place — an operator can run the smoke when ready and
+  capture the result in this log.
+- **Migration of `ClaudeAgent` from daemon to agent-runtime.** Plan
+  10 step 3 calls for moving the class. We deviated: the class stays
+  in `packages/daemon/src/agent/claude/agent.ts` and the
+  agent-runtime imports it via the new `@symphony/daemon/agent/claude`
+  subpath export. This avoids moving ~1.7k lines of source + tests
+  for a code-organization gain that doesn't change behavior. The
+  daemon's composition root (`index.ts`) still constructs
+  `ClaudeAgent` for legacy in-process mode; that path can be removed
+  in Plan 11 once the orchestrator is fully cut over to
+  `ExecutionBackend`.
+- **Daemon composition root wiring.** The daemon's `index.ts` doesn't
+  yet construct `LocalDockerBackend` and `BackendAgentRunner` — the
+  pieces are in place but the operator-visible config switch
+  (`agent.kind: docker` / `execution.backend: local-docker` selecting
+  the new path) is wired in a follow-up patch alongside the smoke
+  run. Composition root changes are out of scope here because they
+  need the smoke run to validate end-to-end.

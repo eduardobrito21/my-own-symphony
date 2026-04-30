@@ -39,7 +39,7 @@ describe('buildDeploymentConfigSchema', () => {
     const schema = buildDeploymentConfigSchema('/tmp/dep');
     const result = schema.safeParse({
       polling: { interval_ms: 10_000 },
-      execution: { backend: 'fake', base_image: 'symphony/agent-base:2' },
+      execution: { backend: 'in-process', base_image: 'symphony/agent-base:2' },
       projects: [
         {
           linear: { project_slug: 'edu' },
@@ -62,7 +62,7 @@ describe('buildDeploymentConfigSchema', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.polling.interval_ms).toBe(10_000);
-    expect(result.data.execution.backend).toBe('fake');
+    expect(result.data.execution.backend).toBe('in-process');
     expect(result.data.projects).toHaveLength(2);
     expect(result.data.projects[0]?.repo.agent_image).toBe('symphony-agent/symphony:latest');
     expect(result.data.projects[1]?.repo.branch_prefix).toBe('mkt/');

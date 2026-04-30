@@ -89,13 +89,24 @@ module.exports = {
       },
     },
     {
-      name: 'agent-only-types-config-workspace',
+      name: 'agent-only-types-config-workspace-execution',
       severity: 'error',
       comment:
-        '`agent/` may depend on `types/`, `config/`, `workspace/`, and `observability/`. It must not depend on `tracker/` or `orchestrator/` — agent runs are driven by the orchestrator, not the other way around.',
+        '`agent/` may depend on `types/`, `config/`, `workspace/`, `execution/` (for the BackendAgentRunner adapter, Plan 10), and `observability/`. It must not depend on `tracker/` or `orchestrator/` — agent runs are driven by the orchestrator, not the other way around.',
       from: { path: 'packages/daemon/src/agent/' },
       to: {
-        path: 'packages/daemon/src/(?!types/|config/|workspace/|agent/|observability/)',
+        path: 'packages/daemon/src/(?!types/|config/|workspace/|agent/|execution/|observability/)',
+        pathNot: 'node_modules',
+      },
+    },
+    {
+      name: 'execution-only-types-config-agent-observability',
+      severity: 'error',
+      comment:
+        '`execution/` provides the ExecutionBackend interface + impls (FakeBackend, LocalDockerBackend) per ADR 0011. It may depend on `types/`, `config/`, `agent/` (for AgentEvent), and `observability/`. It must not reach into `tracker/`, `workspace/`, or `orchestrator/`.',
+      from: { path: 'packages/daemon/src/execution/' },
+      to: {
+        path: 'packages/daemon/src/(?!types/|config/|agent/|execution/|observability/)',
         pathNot: 'node_modules',
       },
     },

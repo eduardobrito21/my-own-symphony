@@ -11,3 +11,6 @@ coverage/
 .eslintcache
 
 .next/
+
+# Plan 10 — per-issue workspaces created by symphony.yaml
+.symphony-workspaces/

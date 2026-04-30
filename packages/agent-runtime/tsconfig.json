@@ -1,0 +1,16 @@
+{
+  // No-emit config consumed by ESLint and the IDE language server.
+  // Mirrors the daemon's tsconfig pattern — see comment there for why.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "noEmit": true,
+    "composite": false
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules"],
+  "references": [
+    { "path": "../types/tsconfig.build.json" },
+    { "path": "../daemon/tsconfig.build.json" }
+  ]
+}

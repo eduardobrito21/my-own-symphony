@@ -133,14 +133,21 @@ export function buildDeploymentConfigSchema(baseDir: string) {
 
   const ExecutionConfigSchema = z
     .object({
-      // The ExecutionBackend implementation to use. `fake` is for
-      // dry runs (no docker required); `local-docker` is the
-      // production v1 backend (Plan 10). Future: `e2b`, `ecs`, etc.
-      backend: z.enum(['fake', 'local-docker']).default('local-docker'),
+      // Where the agent process runs:
+      //   - `local-docker` (default, Plan 10): per-issue Docker pods
+      //     via `LocalDockerBackend`. Production target.
+      //   - `in-process`: the daemon constructs `ClaudeAgent` and
+      //     runs it in its own process — no docker needed. Useful
+      //     for local development against a single repo without
+      //     the image-build cycle. Inherits the daemon's
+      //     filesystem + network; no isolation boundary.
+      // Future: `e2b`, `ecs`, etc.
+      backend: z.enum(['local-docker', 'in-process']).default('local-docker'),
       // The default agent image to use when a project does not
       // specify `agent_image` and does not ship a
       // `.symphony/agent.dockerfile` or `.devcontainer/Dockerfile`.
       // See Plan 10 step 7 for the full image-resolution order.
+      // Ignored when `backend: in-process`.
       base_image: z.string().min(1).default('symphony/agent-base:1'),
     })
     .strict()

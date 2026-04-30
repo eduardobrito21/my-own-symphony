@@ -15,13 +15,15 @@ implementation-specific notes.
 
 ### 1. Workflow / config failures
 
-Examples: missing `WORKFLOW.md`, malformed YAML, unknown tracker kind, missing
-`LINEAR_API_KEY`, missing `ANTHROPIC_API_KEY`.
+Examples: missing `symphony.yaml`, malformed YAML, no projects declared,
+missing `LINEAR_API_KEY`, missing `ANTHROPIC_API_KEY`, unknown
+`execution.backend` value.
 
 - **Startup**: fail fast with a typed error and a clear operator-visible
   message. Do not start the polling loop with a broken config.
-- **At runtime (reload)**: keep the last-known-good config in effect, log the
-  reload error, do not crash.
+- **At runtime**: dynamic reload of `symphony.yaml` is not yet implemented
+  (the legacy `WORKFLOW.md` watcher was removed in the Plan 10 consolidation).
+  Restart the daemon to pick up config changes.
 
 ### 2. Workspace failures
 
@@ -126,19 +128,17 @@ These should always hold; their violation is a bug:
   on a fixed cadence.
 - A failing dashboard request cannot pause dispatch. The HTTP layer never
   shares a thread of execution with the orchestrator's state mutations.
-- A failed `WORKFLOW.md` reload does not change in-flight runs. The new config
-  applies only to subsequent dispatches.
+- The orchestrator's config is loaded once at startup and is immutable for
+  the daemon's lifetime. There is no in-flight config reload.
 
 ## Operator levers
 
-When something is wrong, an operator has three direct tools:
+When something is wrong, an operator has two direct tools:
 
-1. **Edit `WORKFLOW.md`** — most runtime knobs are here. Changes are picked up
-   without restart.
-2. **Change tracker state** — moving an issue to a terminal state stops its
+1. **Change tracker state** — moving an issue to a terminal state stops its
    running session and cleans the workspace at the next reconciliation.
-3. **Restart the daemon** — for process recovery or deployment. Not the path
-   for applying config changes (see lever 1).
+2. **Restart the daemon** — for process recovery, deployment, or applying
+   `symphony.yaml` / `.symphony/workflow.md` changes (no live reload).
 
 ## What this document does not cover
 
