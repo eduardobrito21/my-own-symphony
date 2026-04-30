@@ -175,7 +175,7 @@ backend are all unchanged.
      decide). Choose the simpler path; revisit if real reuse
      is needed.
    - Deadline: `Date.now() + (operatorCaps.maxTurnTimeoutMs
-     ?? default)`. Hard ceiling so leaks are bounded.
+?? default)`. Hard ceiling so leaks are bounded.
    - The dispatch envelope is JSON-stringified and passed as
      the `SYMPHONY_DISPATCH_ENVELOPE` env var on the runCommand
      that runs the agent.
@@ -219,17 +219,10 @@ backend are all unchanged.
 13. **Operator step:** sign up at namespace.so, run
     `nsc auth login` (or set `NSC_TOKEN_FILE`), `pnpm install`.
 14. **Smoke run:** symphony.yaml configured with `backend:
-    namespace`, the EDU-N test issue in Linear's "Smoke Test"
-    project. Verify:
-    - Instance created within ~2s.
-    - Tarball uploaded + extracted.
-    - Repo cloned.
-    - (If repo has a compose file) compose stack starts.
-    - Agent runs, streams events, transitions Linear, posts
-      comment, exits 0.
-    - Instance destroyed.
-    - Linear issue ends in target state, comment posted, no
-      duplicates.
+namespace`, the EDU-N test issue in Linear's "Smoke Test"
+    project. Verify: - Instance created within ~2s. - Tarball uploaded + extracted. - Repo cloned. - (If repo has a compose file) compose stack starts. - Agent runs, streams events, transitions Linear, posts
+    comment, exits 0. - Instance destroyed. - Linear issue ends in target state, comment posted, no
+    duplicates.
 
 ### Stage 14f — Tests
 
@@ -240,8 +233,7 @@ backend are all unchanged.
       deadline + env.
     - Envelope JSON is set on the agent runCommand.
     - Tarball-upload step is invoked.
-    - `stop` calls destroyInstance with the right id; ok on
-      404.
+    - `stop` calls destroyInstance with the right id; ok on 404.
     - `start` returns `pod_start_failed` when the SDK errors;
       no leaked instance (cleanup path runs).
     - The event-stream parser yields parsed AgentEvents from

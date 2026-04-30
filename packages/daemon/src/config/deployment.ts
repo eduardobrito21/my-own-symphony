@@ -134,21 +134,64 @@ export function buildDeploymentConfigSchema(baseDir: string) {
   const ExecutionConfigSchema = z
     .object({
       // Where the agent process runs:
-      //   - `local-docker` (default, Plan 10): per-issue Docker pods
-      //     via `LocalDockerBackend`. Production target.
+      //   - `namespace` (Plan 14, ADR 0012): per-issue Namespace
+      //     microVM. v1 production target. Requires `NSC_TOKEN_FILE`
+      //     or `nsc auth login` to be configured operator-side.
+      //   - `local-docker` (Plan 10): per-issue Docker pods on the
+      //     daemon's host. Useful for dev/local without a Namespace
+      //     account. Has macOS-specific friction documented in the
+      //     Plan 10 decision log.
       //   - `in-process`: the daemon constructs `ClaudeAgent` and
       //     runs it in its own process — no docker needed. Useful
       //     for local development against a single repo without
       //     the image-build cycle. Inherits the daemon's
       //     filesystem + network; no isolation boundary.
       // Future: `e2b`, `ecs`, etc.
-      backend: z.enum(['local-docker', 'in-process']).default('local-docker'),
+      backend: z.enum(['namespace', 'local-docker', 'in-process']).default('local-docker'),
       // The default agent image to use when a project does not
       // specify `agent_image` and does not ship a
       // `.symphony/agent.dockerfile` or `.devcontainer/Dockerfile`.
       // See Plan 10 step 7 for the full image-resolution order.
-      // Ignored when `backend: in-process`.
+      // Ignored when `backend: in-process` or `backend: namespace`
+      // (namespace uses `namespace.base_vm_image` instead).
       base_image: z.string().min(1).default('symphony/agent-base:1'),
+      // Namespace-specific settings. Only consulted when
+      // `backend: namespace`.
+      namespace: z
+        .object({
+          // The Namespace VM base image. Must have node ≥ 20, git,
+          // and docker pre-installed. Configurable so operators
+          // can pin a specific tag for reproducibility.
+          base_vm_image: z
+            .string()
+            .min(1)
+            .default('ghcr.io/namespacelabs/devbox/ubuntu-24.04:latest'),
+          // Region (defaults to `us`). Maps to the SDK's
+          // `createComputeClient({ region })`.
+          region: z.string().min(1).default('us'),
+          // Hard ceiling on instance lifetime. Surfaces as the
+          // `deadline` field on `createInstance`. A daemon crash
+          // can't leak VMs beyond this.
+          max_lifetime_ms: z
+            .number()
+            .int()
+            .positive()
+            .default(30 * 60 * 1000),
+          // Where the agent-runtime is staged from at start time.
+          // Public Symphony repo by default. Future: replace with
+          // a published npm package.
+          symphony_repo_url: z
+            .string()
+            .min(1)
+            .default('https://github.com/eduardobrito21/my-own-symphony.git'),
+          symphony_ref: z.string().min(1).default('main'),
+          // VM shape.
+          vcpu: z.number().int().positive().default(2),
+          memory_mb: z.number().int().positive().default(4096),
+          arch: z.enum(['amd64', 'arm64']).default('amd64'),
+        })
+        .strict()
+        .default({}),
     })
     .strict()
     .default({});

@@ -263,17 +263,31 @@ async function runDispatch(
 async function loadEnvelope(): Promise<
   { ok: true; value: DispatchEnvelope } | { ok: false; reason: string }
 > {
+  // Two transports for the envelope:
+  //   - SYMPHONY_DISPATCH_ENVELOPE env var (NamespaceBackend — no
+  //     host bind-mount available for sandboxed VMs).
+  //   - /etc/symphony/dispatch.json file (LocalDockerBackend, which
+  //     bind-mounts the file into the container at start time).
+  // Env var wins when both are present.
   let raw: string;
-  try {
-    raw = await readFile(ENVELOPE_PATH, 'utf8');
-  } catch (cause) {
-    return { ok: false, reason: `cannot read ${ENVELOPE_PATH}: ${stringify(cause)}` };
+  const envEnvelope = env['SYMPHONY_DISPATCH_ENVELOPE'];
+  if (envEnvelope !== undefined && envEnvelope.length > 0) {
+    raw = envEnvelope;
+  } else {
+    try {
+      raw = await readFile(ENVELOPE_PATH, 'utf8');
+    } catch (cause) {
+      return {
+        ok: false,
+        reason: `neither SYMPHONY_DISPATCH_ENVELOPE env var nor ${ENVELOPE_PATH} is readable: ${stringify(cause)}`,
+      };
+    }
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (cause) {
-    return { ok: false, reason: `${ENVELOPE_PATH} is not valid JSON: ${stringify(cause)}` };
+    return { ok: false, reason: `dispatch envelope is not valid JSON: ${stringify(cause)}` };
   }
   const validation = DispatchEnvelopeSchema.safeParse(parsed);
   if (!validation.success) {

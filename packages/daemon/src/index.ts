@@ -14,8 +14,12 @@
 //
 // `execution.backend` selects how the agent runs:
 //
-//   - `local-docker` (default): per-issue Docker pod via
-//     `LocalDockerBackend` + `BackendAgentRunner`. Production target.
+//   - `namespace` (ADR 0012, Plan 14): per-issue Namespace microVM
+//     via `NamespaceBackend` + `BackendAgentRunner`. v1 production
+//     target. Requires `nsc auth login` (or `NSC_TOKEN_FILE`).
+//   - `local-docker` (default for first-time-user smoothness): per-
+//     issue Docker pod via `LocalDockerBackend` + `BackendAgentRunner`.
+//     Useful for dev/local without a Namespace account.
 //   - `in-process`: the daemon constructs `ClaudeAgent` and runs
 //     it in its own process. No docker, no isolation. Useful for
 //     local development against a single repo without the image-
@@ -37,6 +41,7 @@ import { loadDeployment } from './config/deployment-loader.js';
 import type { DeploymentConfig } from './config/deployment.js';
 import type { ServiceConfig } from './config/schema.js';
 import { LocalDockerBackend } from './execution/index.js';
+import { NamespaceBackend, createNamespaceInstanceRunner } from './execution/namespace/index.js';
 import { startHttpServer, type RunningHttpServer } from './http/server.js';
 import { createConsoleLogger, type Logger } from './observability/index.js';
 import { Orchestrator } from './orchestrator/index.js';
@@ -139,7 +144,7 @@ async function main(): Promise<number> {
   const projects: ProjectContextMap = projectsMap;
 
   // ---- Agent runner (per `execution.backend`) ----
-  const agent = buildAgent(deployment, dispatchMap, linearClient, logger);
+  const agent = await buildAgent(deployment, dispatchMap, linearClient, logger);
   if (agent === null) return 1;
 
   // ---- Orchestrator config (synthesized from DeploymentConfig) ----
@@ -254,12 +259,12 @@ async function main(): Promise<number> {
  * on misconfiguration so the caller can exit nonzero before the
  * orchestrator starts.
  */
-function buildAgent(
+async function buildAgent(
   deployment: DeploymentConfig,
   projectDispatch: ReadonlyMap<ProjectKey, ProjectDispatchInfo>,
   linearClient: LinearClient,
   logger: Logger,
-): AgentRunner | null {
+): Promise<AgentRunner | null> {
   const backendKind = deployment.execution.backend;
 
   if (backendKind === 'in-process') {
@@ -284,17 +289,9 @@ function buildAgent(
     });
   }
 
-  // `local-docker` (default).
-  logger.info('execution backend: local-docker', {
-    base_image: deployment.execution.base_image,
-  });
-  const backend = new LocalDockerBackend({
-    baseImage: deployment.execution.base_image,
-    logger,
-  });
-
-  // Pod env: secrets the in-pod entrypoint reads. The daemon
-  // forwards whatever's in its own process env (sourced from `.env`).
+  // Pod env: secrets the in-pod entrypoint reads. Shared between
+  // `local-docker` and `namespace` (the daemon forwards its own
+  // process env, sourced from `.env`).
   const linearApiKey = env['LINEAR_API_KEY'] ?? '';
   const podEnv: Record<string, string> = { LINEAR_API_KEY: linearApiKey };
   const anthropicKey = env['ANTHROPIC_API_KEY'];
@@ -310,18 +307,67 @@ function buildAgent(
     podEnv['GITHUB_TOKEN'] = githubToken;
   }
 
+  const operatorCaps = {
+    model: deployment.agent.model,
+    ...(deployment.agent.max_model_round_trips !== undefined && {
+      maxTurns: deployment.agent.max_model_round_trips,
+    }),
+    ...(deployment.agent.max_budget_usd !== undefined && {
+      maxBudgetUsd: deployment.agent.max_budget_usd,
+    }),
+  };
+
+  if (backendKind === 'namespace') {
+    const ns = deployment.execution.namespace;
+    logger.info('execution backend: namespace', {
+      base_vm_image: ns.base_vm_image,
+      region: ns.region,
+      vcpu: ns.vcpu,
+      memory_mb: ns.memory_mb,
+      arch: ns.arch,
+    });
+    let runner;
+    try {
+      runner = await createNamespaceInstanceRunner({ region: ns.region });
+    } catch (cause) {
+      logger.error(
+        'failed to construct Namespace SDK client — check `nsc auth login` or NSC_TOKEN_FILE',
+        { error: cause instanceof Error ? cause.message : String(cause) },
+      );
+      return null;
+    }
+    const backend = new NamespaceBackend({
+      baseImage: ns.base_vm_image,
+      shape: { vcpu: ns.vcpu, memoryMb: ns.memory_mb, arch: ns.arch },
+      maxLifetimeMs: ns.max_lifetime_ms,
+      symphonyRepoUrl: ns.symphony_repo_url,
+      symphonyRef: ns.symphony_ref,
+      logger,
+      runner,
+    });
+    return new BackendAgentRunner({
+      backend,
+      projectDispatch,
+      operatorCaps,
+      baseImage: ns.base_vm_image,
+      env: podEnv,
+      logger,
+    });
+  }
+
+  // `local-docker` (default).
+  logger.info('execution backend: local-docker', {
+    base_image: deployment.execution.base_image,
+  });
+  const backend = new LocalDockerBackend({
+    baseImage: deployment.execution.base_image,
+    logger,
+  });
+
   return new BackendAgentRunner({
     backend,
     projectDispatch,
-    operatorCaps: {
-      model: deployment.agent.model,
-      ...(deployment.agent.max_model_round_trips !== undefined && {
-        maxTurns: deployment.agent.max_model_round_trips,
-      }),
-      ...(deployment.agent.max_budget_usd !== undefined && {
-        maxBudgetUsd: deployment.agent.max_budget_usd,
-      }),
-    },
+    operatorCaps,
     baseImage: deployment.execution.base_image,
     env: podEnv,
     logger,
