@@ -1,13 +1,18 @@
-# Plan 10 — Deployable services + v1 polish
+# Plan 13 — Deployable services + v1 polish
 
 - **Status:** 📝 Drafted
 - **Replaces:** the original Plan 09 (Docker + polish), reshaped
-  to follow Plan 09's pivot to the agent-in-pod model. With the
-  agent runtime now containerized AND the agent-process inside
-  the pod (Plan 09 stages 09c–09d), what's left here is the
-  **service tier**: packaging the daemon + dashboard + API
-  themselves so a fresh machine with only Docker can run
+  to follow the agent-in-pod model. With the agent runtime
+  containerized (Plan 10), idempotent side effects (Plan 11),
+  and the live PR demo (Plan 12) all in place, what's left here
+  is the **service tier**: packaging the daemon + dashboard +
+  API themselves so a fresh machine with only Docker can run
   Symphony.
+- **Renumber:** previously Plan 10. Bumped to 14 when the original
+  Plan 09 was split into Plans 09 (multi-project foundation),
+  11 (agent-in-pod runtime), 12 (idempotent side effects), and
+  13 (end-to-end PR demo). See decision log at the bottom of
+  Plan 09 for the rationale.
 - **Spec sections:** none directly (deployment is out of spec
   scope).
 - **Layers touched:** new top-level `Dockerfile.daemon` /
@@ -18,15 +23,15 @@
 - **ADRs referenced:** 0003 (two-process architecture),
   0009 (multi-project), 0010 (HTTP provisional — resolved by
   this plan), 0011 (agent-in-pod + ExecutionBackend).
-- **Comes AFTER:** Plan 09. Reason: containerizing the daemon is
-  pointless if the daemon doesn't yet do the multi-project +
-  agent-in-pod work that's the whole point. The docker-socket
-  mount that lets the daemon spawn pods (this plan) is
-  meaningless until the daemon knows how to spawn pods (Plan 09).
+- **Comes AFTER:** Plans 09, 11, 12, 13. Reason: containerizing
+  the daemon is pointless if the daemon doesn't yet do the
+  multi-project + agent-in-pod work that's the whole point. The
+  docker-socket mount that lets the daemon spawn pods (this plan)
+  is meaningless until the daemon knows how to spawn pods (Plan 10) and the agent loop is end-to-end (Plans 11, 13).
 
 ## Goal
 
-After Plan 10, a fresh machine with ONLY `docker` and `docker
+After Plan 13, a fresh machine with ONLY `docker` and `docker
 compose` installed can:
 
 1. `git clone <symphony-repo> && cd <symphony-repo>`
@@ -79,7 +84,7 @@ docker-compose up
  docker-compose.)
 ```
 
-Three services because Plan 10 also resolves ADR 0010 (split the
+Three services because Plan 13 also resolves ADR 0010 (split the
 HTTP server out of the daemon). The split is cheap to do at the
 container boundary.
 
@@ -89,7 +94,7 @@ Three options, ranked from least to most painful:
 
 - **Sibling containers via host docker socket mount.** Daemon
   runs in a container with `/var/run/docker.sock` mounted; when
-  it calls `docker run`, the new container is a *sibling* on the
+  it calls `docker run`, the new container is a _sibling_ on the
   host's docker daemon, not a child of the daemon container.
   Standard pattern (GitLab Runner, Jenkins, Drone all use this).
   Trade-off: the daemon container has effective root on the host
@@ -112,22 +117,22 @@ Going with sibling containers.
   autoscaling, HA). This is a personal/learning project; not a
   SaaS.
 - **CI publishing of images.** Local `docker build` + `docker
-  compose build` is enough for v1.
+compose build` is enough for v1.
 - **Telemetry export to a remote backend.** Logs go to stdout;
   whoever runs Symphony pipes them wherever.
 - **Multi-arch images.** Build for the host's arch only.
 - **Auto-update of the agent runtime image** (`symphony/agent-base`).
   The deployment includes a `pnpm docker:build:agent-base`
   script the operator runs manually. Per-repo image rebuilds
-  are also manual (Plan 09 step 14).
+  are also manual (Plan 10).
 - **TLS / reverse proxy.** Loopback-bound by default. If the
   user exposes externally, they bring the TLS layer.
 - **Alternative ExecutionBackends** (E2B, ECS, k8s Jobs). The
-  interface is in place from Plan 09; new impls are Plan 11+.
+  interface is in place from Plan 09; new backends are Plan 10+.
 
 ## Steps
 
-### Stage 10a — HTTP-server process split (resolve ADR 0010)
+### Stage 14a — HTTP-server process split (resolve ADR 0010)
 
 1. **Daemon emits state over a Unix domain socket** instead of
    serving HTTP directly:
@@ -165,7 +170,7 @@ Going with sibling containers.
    - Backward-compat: dashboard's existing tests against the
      wire shape pass unchanged.
 
-### Stage 10b — Daemon Dockerfile
+### Stage 14b — Daemon Dockerfile
 
 6. **`packages/daemon/Dockerfile`**:
    - Multi-stage. Builder runs `pnpm install --frozen-lockfile`
@@ -197,7 +202,7 @@ Going with sibling containers.
    - `/var/run/symphony/` — shared volume for state-socket and
      pod event sockets.
 
-### Stage 10c — Dashboard Dockerfile
+### Stage 14c — Dashboard Dockerfile
 
 8. **`packages/dashboard/Dockerfile`**:
    - Multi-stage Next.js build with `output: standalone` in
@@ -207,14 +212,14 @@ Going with sibling containers.
    - Non-root user.
    - Healthcheck: `curl -f http://localhost:3001/`.
 
-### Stage 10d — API process Dockerfile
+### Stage 14d — API process Dockerfile
 
 9. **`packages/api/Dockerfile`**:
    - Tiny Node image. Same multi-stage pattern as the daemon.
    - Mounts the daemon's state socket via the shared volume.
    - Healthcheck hits its own `/api/v1/health`.
 
-### Stage 10e — docker-compose.yml at repo root
+### Stage 14e — docker-compose.yml at repo root
 
 10. **`docker-compose.yml`**:
     - Three services: `daemon`, `api`, `dashboard`.
@@ -246,17 +251,14 @@ Going with sibling containers.
     - Where to look first when something breaks (logs, state
       socket, port conflicts, missing agent-base image).
 
-### Stage 10f — v1-done polish
+### Stage 14f — v1-done polish
 
-13. **Doc consistency sweep**:
-    - Read every file in `docs/`, fix stale references to
-      Codex / Fastify / single-project / single-process / `pnpm
-      symphony WORKFLOW.md`-only.
-    - Read every file in `docs/exec-plans/active/` — anything
-      complete moves to `completed/`. Anything still in flight
-      gets an explicit one-line reason.
-    - Read every ADR; verify status is correct (especially
-      0010 → "Resolved by Plan 10").
+13. **Doc consistency sweep**: - Read every file in `docs/`, fix stale references to
+    Codex / Fastify / single-project / single-process / `pnpm
+symphony WORKFLOW.md`-only. - Read every file in `docs/exec-plans/active/` — anything
+    complete moves to `completed/`. Anything still in flight
+    gets an explicit one-line reason. - Read every ADR; verify status is correct (especially
+    0010 → "Resolved by Plan 13").
 
 14. **Tech-debt sweep**:
     - `pnpm deps:check` clean.
@@ -298,11 +300,11 @@ Going with sibling containers.
   re-attaches to any still-running pods (verifies Plan 09's
   reattach guarantee survives the daemon being containerized).
 - ADR 0010 status updates from "Accepted (provisional)" to
-  "Accepted (resolved by Plan 10)".
+  "Accepted (resolved by Plan 13)".
 - All exec plans are either in `completed/` or have an explicit
   status reason for remaining `active/`.
 - The repo passes `pnpm typecheck && pnpm lint && pnpm test &&
-  pnpm deps:check && pnpm build` cleanly from a fresh checkout.
+pnpm deps:check && pnpm build` cleanly from a fresh checkout.
 - A first-time reader following only `README.md` → `AGENTS.md` →
   `ARCHITECTURE.md` can boot the system within an hour.
 
@@ -314,7 +316,7 @@ Going with sibling containers.
   for a hosted multi-tenant deployment. We document the risk in
   `SECURITY.md` and call out that production deployments need a
   different ExecutionBackend (rootless docker, k8s Job per
-  workspace, E2B). Not Plan 10's job to solve; Plan 10's job is
+  workspace, E2B). Not Plan 13's job to solve; Plan 13's job is
   to flag it.
 - **Workspace path mirror requirement.** The daemon container
   mounts the host's workspace dir at
