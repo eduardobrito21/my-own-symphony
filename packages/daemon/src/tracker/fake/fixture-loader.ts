@@ -10,7 +10,13 @@ import { readFile } from 'node:fs/promises';
 
 import { parse as parseYaml } from 'yaml';
 
-import { IssueId, IssueIdentifier, type Issue, type BlockerRef } from '../../types/index.js';
+import {
+  IssueId,
+  IssueIdentifier,
+  ProjectKey,
+  type Issue,
+  type BlockerRef,
+} from '../../types/index.js';
 
 import { FixtureSchema, type RawIssue } from './fixture-schema.js';
 
@@ -89,6 +95,12 @@ function toDomainIssue(raw: RawIssue): Issue {
   return {
     id: IssueId(raw.id),
     identifier: IssueIdentifier(raw.identifier),
+    // Trackers don't know the project — the orchestrator stamps
+    // the real `projectKey` after fetching, using the project
+    // context the issue arrived through. We default to a sentinel
+    // `default` so test fixtures and direct FakeTracker use stay
+    // ergonomic. See ADR 0009 / Plan 09c.
+    projectKey: ProjectKey('default'),
     title: raw.title,
     description: raw.description,
     priority: raw.priority,

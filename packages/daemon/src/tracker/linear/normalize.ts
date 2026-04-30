@@ -13,9 +13,24 @@
 //                               null/empty placeholders so the
 //                               `Issue` type still parses)
 
-import { IssueId, IssueIdentifier, type BlockerRef, type Issue } from '../../types/index.js';
+import {
+  IssueId,
+  IssueIdentifier,
+  ProjectKey,
+  type BlockerRef,
+  type Issue,
+} from '../../types/index.js';
 
 import type { FullIssue, MinimalIssue } from './responses.js';
+
+/**
+ * Default `projectKey` stamped on the Issue here. The orchestrator
+ * overwrites this with the real project key from the calling
+ * `ProjectContext` (per Plan 09c, the tracker layer is ignorant of
+ * project membership; the orchestrator owns stamping). The sentinel
+ * `default` makes single-project + tracker-direct tests ergonomic.
+ */
+const PLACEHOLDER_PROJECT_KEY = ProjectKey('default');
 
 /**
  * Full normalization: every field of `Issue` is populated from
@@ -25,6 +40,7 @@ export function normalizeFullIssue(raw: FullIssue): Issue {
   return {
     id: IssueId(raw.id),
     identifier: IssueIdentifier(raw.identifier),
+    projectKey: PLACEHOLDER_PROJECT_KEY,
     title: raw.title,
     description: raw.description,
     priority: raw.priority,
@@ -58,6 +74,7 @@ export function normalizeMinimalIssue(raw: MinimalIssue): Issue {
   return {
     id: IssueId(raw.id),
     identifier: IssueIdentifier(raw.identifier),
+    projectKey: PLACEHOLDER_PROJECT_KEY,
     title: '',
     description: null,
     priority: null,

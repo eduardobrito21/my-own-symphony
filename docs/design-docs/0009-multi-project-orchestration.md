@@ -244,10 +244,10 @@ its agent's behavior without touching Symphony. Rejected.
 ## Schedule
 
 This decision is implemented in
-[Plan 09](../exec-plans/active/09-multi-project-and-agent-runtime.md).
+[Plan 09](../exec-plans/completed/09-multi-project-and-agent-runtime.md).
 The plan includes the schema, the orchestrator refactor, the
 project-namespaced workspace path, and a self-hosting demo against
 the Symphony repo's own Linear project.
 
 The deployment-side packaging (Dockerfiles, docker-compose) is
-[Plan 10](../exec-plans/active/10-deployable-services-and-v1-polish.md).
+[Plan 13](../exec-plans/active/13-deployable-services-and-v1-polish.md).

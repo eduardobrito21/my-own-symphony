@@ -44,13 +44,13 @@ coupling is desired long-term.
 
 - Plan 08 ships co-located. Documented in this ADR so the trade-off
   is on the record.
-- **Plan 10 (Deployable services + v1 polish)** is the next natural
+- **Plan 13 (Deployable services + v1 polish)** is the next natural
   cut point: when the daemon and dashboard ship as separate Docker
   containers, the HTTP server moves into a third process. The
   dashboard polls that third process; the third process talks to
   the daemon over a Unix domain socket (or a small read-only
   state file the daemon writes periodically — implementation TBD
-  in Plan 10).
+  in Plan 13).
 - Until then, `packages/dashboard` deliberately **does not import
   from `packages/daemon`**. The wire format
   (`packages/daemon/src/http/serialize.ts`'s
@@ -87,7 +87,7 @@ daemons that share one observability surface.
 
 **Harder:**
 
-- Plan 10 carries the cost of the split. Estimated ~300 lines:
+- Plan 13 carries the cost of the split. Estimated ~300 lines:
   a Unix-socket server in the daemon, an HTTP server that
   proxies it, and configuration plumbing.
 - The wire format is now load-bearing for two consumers. Breaking
@@ -98,7 +98,7 @@ daemons that share one observability surface.
 - The daemon's HTTP server is **bound to loopback only**. It is
   never the right answer to expose it externally; the
   dashboard-or-its-successor process is what handles external
-  traffic in Plan 10+.
+  traffic in Plan 14+.
 - The dashboard package must not develop a hard dependency on the
   daemon's runtime. Hand-mirrored types in
   `app/api-types.ts` are a feature, not a workaround.
@@ -107,7 +107,7 @@ daemons that share one observability surface.
 
 The split criteria for "when do we actually do this":
 
-1. **Trigger:** when Plan 10 starts the deployment-tier
+1. **Trigger:** when Plan 13 starts the deployment-tier
    containerization. Splitting at the container boundary is
    cheap; splitting later ("retroactively bolt on a second
    process") is much more work.
@@ -125,5 +125,5 @@ The split criteria for "when do we actually do this":
 ## Schedule
 
 This decision is paired with
-[Plan 10](../exec-plans/active/10-deployable-services-and-v1-polish.md),
+[Plan 13](../exec-plans/active/13-deployable-services-and-v1-polish.md),
 which is where the split actually happens.

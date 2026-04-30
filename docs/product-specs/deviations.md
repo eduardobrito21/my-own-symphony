@@ -121,8 +121,18 @@ ownership boundaries follow.
 SPEC §5's single-file model when running in multi-project mode.
 Single-project mode preserves the spec's `WORKFLOW.md` shape.
 
-**Status:** Tracked in
-[`docs/exec-plans/active/09-multi-project-and-agent-runtime.md`](../exec-plans/active/09-multi-project-and-agent-runtime.md).
+**Status:** **Shipped (foundation)** as of Plan 09 stage 09c.
+The orchestrator is multi-project end-to-end with `FakeBackend`
+in tests; `Issue` carries a `projectKey`; workspaces are
+namespaced by project (`<root>/<projectKey>/<id>/`); the
+snapshot wire format includes a per-project `projects[]`
+breakdown the dashboard renders. The `symphony.yaml` schema is
+implemented and parsed (Plan 09 stage 09b). The composition
+root still runs in single-project compat mode at runtime;
+multi-project YAML wiring at startup happens alongside the pod
+runtime in [Plan 10](../exec-plans/active/10-agent-in-pod-runtime.md).
+Per-repo `<repo>/.symphony/workflow.md` is loaded **by the pod**
+after the clone (Plan 10) — the daemon never reads it directly.
 
 ---
 

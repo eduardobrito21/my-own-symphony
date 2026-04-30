@@ -19,7 +19,7 @@
 // Per spec §4.1.7 we use a monotonic clock for `dueAtMs` so timers
 // keep firing correctly across wall-clock changes (NTP, DST).
 
-import type { IssueId, IssueIdentifier, RetryEntry } from '../types/index.js';
+import type { Issue, IssueId, IssueIdentifier, ProjectKey, RetryEntry } from '../types/index.js';
 
 import type { TimerSchedule } from './orchestrator.js';
 import type { MutableOrchestratorState } from './state.js';
@@ -30,6 +30,15 @@ export interface ScheduleRetryArgs {
   readonly state: MutableOrchestratorState;
   readonly issueId: IssueId;
   readonly identifier: IssueIdentifier;
+  /** Project the retry belongs to (Plan 09c). `handleRetryFire`
+   *  uses this to pick the right tracker on re-fetch; the
+   *  snapshot uses it to attribute retries to the right project
+   *  counter. */
+  readonly projectKey: ProjectKey;
+  /** Optional snapshot of the issue at retry-schedule time. When
+   *  present, snapshot/per-project counters use this rather than
+   *  re-deriving from the projectKey alone. */
+  readonly issue?: Issue;
   readonly attempt: number;
   readonly delayKind: RetryDelayKind;
   readonly maxRetryBackoffMs: number;
@@ -50,6 +59,8 @@ export function scheduleRetry(args: ScheduleRetryArgs): number {
     state,
     issueId,
     identifier,
+    projectKey,
+    issue,
     attempt,
     delayKind,
     maxRetryBackoffMs,
@@ -77,6 +88,8 @@ export function scheduleRetry(args: ScheduleRetryArgs): number {
   const entry: RetryEntry = {
     issueId,
     identifier,
+    projectKey,
+    ...(issue !== undefined && { issue }),
     attempt,
     dueAtMs: now + delayMs,
     timerHandle: handle,
