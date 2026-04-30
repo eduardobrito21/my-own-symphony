@@ -72,20 +72,85 @@ we won't add one until a concrete need arises.
 
 ---
 
-### §13.7 — Optional HTTP server — **Substituted (deferred)**
+### §13.7 — Optional HTTP server — **Substituted**
 
 **Spec:** describes an optional HTTP server with `/`,
 `/api/v1/state`, `/api/v1/<id>`, `/api/v1/refresh`. Implementations
 may serve HTML or a client-side app.
 
-**Here:** the daemon exposes `/api/v1/*` (Fastify, JSON-only). The UI
-is a separate Next.js process consuming the API.
+**Here:** the daemon exposes `/api/v1/health` and `/api/v1/state`
+(JSON-only, built-in `node:http`, not Fastify). The UI is a
+separate Next.js process consuming the API. `/api/v1/<id>` and
+`/api/v1/refresh` from the spec are **deferred** (not currently
+needed; would require a daemon-side event buffer).
 
-**Reasoning:** [ADR 0003](../design-docs/0003-two-process-architecture.md)
+**Reasoning:** [ADR 0003](../design-docs/0003-two-process-architecture.md);
+[ADR 0010](../design-docs/0010-co-located-http-is-provisional.md)
+documents the provisional in-process arrangement and the planned
+split in Plan 10.
 
-**Status:** Deferred. The HTTP API ships in Phase 8a; the dashboard in
-Phase 8b. Tracked in
-[`docs/exec-plans/active/08-http-api-and-dashboard.md`](../exec-plans/active/08-http-api-and-dashboard.md).
+**Status:** Shipped as of Plan 08. See
+[`docs/exec-plans/completed/08-http-api-and-dashboard.md`](../exec-plans/completed/08-http-api-and-dashboard.md).
+
+---
+
+### §5 / §11.2 — Single-project workflow file — **Substituted (multi-project)**
+
+**Spec:** SPEC §5 describes a single `WORKFLOW.md` file that pairs
+one tracker (one `tracker.project_slug` per §11.2) with one prompt
+template, one set of hooks, and one set of agent settings. The
+implicit deployment shape is "one daemon, one project."
+
+**Here:** the daemon takes a deployment YAML
+(`symphony.yaml`) listing N projects. Each project entry binds a
+Linear project slug to a git repo URL. The repo's per-project
+agent workflow lives **inside the target repo** at
+`<repo>/.symphony/workflow.md`, version-controlled with the code.
+The daemon clones the repo, reads its workflow, and dispatches.
+
+The legacy single-`WORKFLOW.md` invocation (`pnpm symphony
+path/to/WORKFLOW.md`) is preserved as a single-project
+compatibility mode — wraps an implicit one-project deployment.
+
+**Reasoning:** [ADR 0009](../design-docs/0009-multi-project-orchestration.md).
+The four-layer config split (operator deployment / project
+binding / per-repo workflow / ephemeral state) is the core idea;
+ownership boundaries follow.
+
+**Implication:** This implementation is **not conformant** with
+SPEC §5's single-file model when running in multi-project mode.
+Single-project mode preserves the spec's `WORKFLOW.md` shape.
+
+**Status:** Tracked in
+[`docs/exec-plans/active/09-multi-project-and-agent-runtime.md`](../exec-plans/active/09-multi-project-and-agent-runtime.md).
+
+---
+
+### §9.3 — Workspace population — **Substituted (containerized)**
+
+**Spec:** says workspace population beyond directory creation is
+"implementation-defined" and typically handled via hooks.
+
+**Here:** workspace population is implemented via a per-workspace
+Docker container. The `before_run` hook clones the repo and
+installs deps **inside the container**, not on the host. The
+agent's shell tool (Bash) routes through wrapper scripts in
+`<workspace>/.symphony/bin/` that `docker exec` into the
+container. The host's `PATH` is constrained to those wrappers
+plus a minimal allowlist, so the agent cannot accidentally use a
+host-installed `git`/`pnpm`/`gh` that would not exist in
+production.
+
+**Reasoning:** see Plan 09 decision log. Spec §9.3 explicitly
+permits implementation-defined population, so this is a
+**substitution** (different mechanism) rather than a deviation
+(different intent).
+
+**Implication:** the host Symphony runs on must have Docker
+Desktop (or a compatible Docker engine) running. If `docker` is
+not available on `PATH`, multi-project mode fails at startup;
+single-project compatibility mode without containers continues
+to work.
 
 ---
 

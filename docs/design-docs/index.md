@@ -31,3 +31,5 @@ Filenames are `NNNN-kebab-case-summary.md`, four-digit zero-padded.
 | [0006](0006-zod-at-every-boundary.md)             | Use zod for parsing every value crossing a boundary                    | Accepted |
 | [0007](0007-fake-tracker-before-linear.md)        | Implement a `FakeTracker` before the real Linear adapter               | Accepted |
 | [0008](0008-fold-codex-section-into-agent.md)     | Fold the `codex.*` section into `agent.*`                              | Accepted |
+| [0009](0009-multi-project-orchestration.md)       | Multi-project orchestration (deviation from spec's single-project)     | Accepted |
+| [0010](0010-co-located-http-is-provisional.md)    | Co-located HTTP server is provisional; split in Plan 10                | Accepted |
