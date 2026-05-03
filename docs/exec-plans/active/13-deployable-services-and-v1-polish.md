@@ -1,16 +1,26 @@
 # Plan 13 — Deployable services + v1 polish
 
-- **Status:** 🟡 Drafted, reshape pending — see ADR 0012 +
-  Plan 14. The original plan was sized for "containerize the
-  daemon so it can run alongside its in-pod containers, with
-  the docker-socket-mount complexity that implies." With ADR
-  0012 making Namespace the v1 production backend, the daemon
-  no longer needs Docker access on its host — it talks to
-  Namespace's API. The deploy story collapses to "run the
-  daemon as a Node process" (laptop, Fly.io machine, small
-  EC2 — operator's choice). Most of the original Stage 13a-c
-  work is replaced or deleted. Defer the rewrite of this plan
-  until Plan 14 ships and we know exactly what's left.
+- **Status:** 🟡 Drafted, reshape pending — see ADRs 0012 + 0013
+  and Plans 14 / 15. The original plan was sized for
+  "containerize the daemon so it can run alongside its in-pod
+  containers, with the docker-socket-mount complexity that
+  implies." With ADR 0012 making Namespace the v1 production
+  backend, the daemon no longer needs Docker access on its host
+  — it talks to Namespace's API. The deploy story collapses to
+  "run the daemon as a Node process" (laptop, Fly.io machine,
+  small EC2 — operator's choice). Most of the original Stage
+  13a-c work is replaced or deleted.
+- **Additional reshape input (2026-05-03 — ADR 0013):** the
+  daemon ↔ pod transport is moving to a broker-based pull model.
+  Under Pattern A (daemon-as-controller), the daemon must be
+  publicly addressable — adds TLS termination + DNS to this
+  plan's deploy story. Under Pattern B (Redis broker), the
+  daemon stays inbound-traffic-free — simplifies it (no public
+  endpoint to defend). This plan's three-process Unix-socket
+  split (Stage 14a) is also affected: under Pattern B the api
+  process and the daemon both become Redis clients; the Unix
+  socket between them may go away entirely. Defer the rewrite
+  until Plan 15 ships and the A-vs-B choice is made.
 - **Replaces:** the original Plan 09 (Docker + polish), reshaped
   to follow the agent-in-pod model. With the agent runtime
   containerized (Plan 10), idempotent side effects (Plan 11),

@@ -1,12 +1,31 @@
 # 0012 — Namespace as the v1 production ExecutionBackend
 
-- **Status:** Proposed
+- **Status:** Proposed (implementation transport reshaped by ADR 0013)
 - **Date:** 2026-04-30
 - **Relates to:** Evolves ADR 0011's "v1 ships exactly one impl
   (`LocalDockerBackend`)" framing. The `ExecutionBackend` seam,
   the agent-in-pod model, and the dispatch envelope all stand
   unchanged — this ADR adds a second backend and renames which
   one is "production."
+
+> **Reshape note (2026-05-03):** ADR 0013 reshapes the
+> implementation transport this ADR sketches. Specifically:
+>
+> - This ADR's "use `Compute.createInstance` with a `containers`
+>   array + server-streaming `RunCommand` + envelope-via-env-var"
+>   pattern is replaced by a broker-based pull model (pod pulls
+>   envelope from a broker, publishes events to the same broker).
+> - The DevBox-vs-Instance question that surfaced after this ADR
+>   was written is **answered: `Compute.Instance`** — once the
+>   daemon no longer needs a streaming exec channel into the pod,
+>   Instance's first-class `deadline` field is sufficient.
+> - The higher-level decision recorded here — **Namespace as the
+>   v1 production target** — stands. Only the implementation
+>   plumbing changes.
+>
+> Plan 14 (the implementation of this ADR) is paused pending the
+> A-vs-B choice in ADR 0013. See ADR 0013 for the full transport
+> decision and the comparison table.
 
 ## Context
 

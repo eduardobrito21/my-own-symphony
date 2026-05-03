@@ -1,9 +1,40 @@
 # Plan 14 — Namespace ExecutionBackend
 
-- **Status:** 📝 Drafted
+- **Status:** 🔴 Superseded by ADR 0013; pending Plan 15
 - **New plan.** Created 2026-04-30 after the design discussion
   that produced ADR 0012 (Namespace as the v1 production
   ExecutionBackend).
+
+> **Supersession note (2026-05-03):** ADR 0013 reshapes the
+> daemon ↔ pod transport this plan was built around. Concretely,
+> the following parts of this plan are now wrong:
+>
+> - **Stage 14b** (envelope-via-env-var, stdout-as-event-channel)
+>   — under ADR 0013, the pod pulls its envelope from a broker
+>   and publishes events to the broker. No envelope env var, no
+>   stdout JSON-line parsing.
+> - **Stage 14c step 7's "streaming `runCommand` for the agent
+>   process"** — no longer needed; the agent talks to the broker
+>   directly, the daemon is not an exec proxy.
+> - **`event-stream.ts`** in the existing implementation on the
+>   `plan14-namespace-backend` branch — throwaway under either
+>   ADR 0013 pattern.
+>
+> What survives + folds into Plan 15:
+>
+> - The `Compute.Instance` plumbing in `sdk-runner.ts` (now the
+>   correct primitive — DevBox-vs-Instance is settled by ADR 0013
+>   in favor of Instance).
+> - Backend lifecycle shape (`createInstance`, `waitInstance`,
+>   `destroyInstance` with `deadline` for leak-bounded cleanup).
+> - Agent-runtime tarball staging (Stage 14a / Stage 14c step 9)
+>   — orthogonal to transport.
+> - Composition-root config wiring (Stage 14d) — orthogonal to
+>   transport.
+>
+> Plan 15 will be drafted once the A-vs-B choice in ADR 0013 is
+> made. The `plan14-namespace-backend` branch stays as reference
+> code; do not extend it further.
 - **Spec sections:** none directly (this is an additional
   backend behind ADR 0011's seam).
 - **Layers touched:** new

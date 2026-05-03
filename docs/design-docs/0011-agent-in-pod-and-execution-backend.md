@@ -1,7 +1,26 @@
 # 0011 — Agent runs inside the per-task pod; ExecutionBackend is the seam
 
-- **Status:** Accepted
+- **Status:** Accepted (transport sections superseded by ADR 0013)
 - **Date:** 2026-04-30
+
+> **Supersession note (2026-05-03):** ADR 0013 replaces this ADR's
+> *transport* mechanisms — specifically the file-mounted dispatch
+> envelope (`/etc/symphony/dispatch.json`), the per-pod reverse
+> TCP listener bound by the daemon, and the `host.docker.internal`
+> + `bindEventSocket` machinery in `LocalDockerBackend`. Under
+> ADR 0013 the pod **pulls** its envelope from a broker (HTTP or
+> Redis, depending on the chosen pattern) and **publishes** events
+> to the same broker; the daemon is no longer pushed-to over a
+> per-pod socket.
+>
+> What still holds from this ADR: the **agent-in-pod model** (the
+> agent runs inside the per-task isolation boundary, not as a
+> child of the daemon), the **`ExecutionBackend` interface as the
+> seam** between dispatch and runtime, the **idempotency contract**
+> on `start()`, and the **dispatch-envelope schema** (only its
+> transport changes). Sections of this ADR discussing the host
+> file-mount and the reverse socket should be read as historical
+> context for the original LocalDocker shape.
 
 ## Context
 
