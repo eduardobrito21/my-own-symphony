@@ -1,6 +1,6 @@
 # Plan 20 — Pipeline bookends: `@planner`, `@curator`, and exec-plan state
 
-- **Status:** Not started
+- **Status:** ✅ Complete (2026-05-17, with deferrals — see Decision log)
 - **Implements:** Two new sub-agents that wrap the existing
   `@sandbox → @coder → @ci` pipeline, plus an explicit state
   machine for execution plans so doc-level state stays observable.
@@ -654,4 +654,59 @@ plan_path: "..."}` causes the parent prompt to thread the
 
 ## Decision log
 
-(Empty until execution begins.)
+### 2026-05-17 — Plan close-out (with deferrals)
+
+Shipped:
+
+- **Stage 20-2 (`@planner` sub-agent MVP)** via PR #29.
+  `@planner` decides plan-vs-skip per its SKILL.md heuristics,
+  writes a plan file under `docs/exec-plans/active/` in the
+  worktree, commits it with a `Committed-by: @planner` footer.
+  Validated live during the EDU-25 smoke (Plan 18b).
+- **Stage 20-3 (`@curator` per-pipeline mode)** via PR #32.
+  Curator is wired as Stage 4 of the pipeline (between `@coder`
+  and `@ci`). Three harness-integrity rules in v1:
+  cross-reference resolution, exec-plan lifecycle, index ↔
+  directory parity. Auto-fix bar is "mechanical and
+  unambiguous"; everything else surfaces as structured `flags[]`
+  rendered into the Linear close-out comment under a "Curator
+  findings" section.
+
+Dropped or deferred:
+
+- **Stage 20-1 (frontmatter schema + backfill)** — deferred.
+  Existing plans use ad-hoc `- **Status:**` markdown bullets
+  rather than YAML frontmatter. New plans written by
+  `@planner` _do_ use the YAML frontmatter form, so we have
+  format drift between old and new. Until the backfill ships,
+  `@curator`'s Rule 2 (exec-plan lifecycle integrity) is a
+  no-op on pre-Plan-20 plans. Tracked as a dedicated entry in
+  `tech-debt-tracker.md`.
+- **Stage 20-4 (periodic `@curator`)** — explicitly dropped
+  during design discussion. Per-pipeline curator only for v1.
+  A housekeeping subcommand stays out of scope; if recurring
+  drift becomes a problem, revisit then. Documented here so
+  the dropping is intentional, not accidental.
+- **Stage 20-5 (live curator smoke)** — not yet exercised on
+  a real dispatch with harness-relevant changes. Will surface
+  in the next dispatch that modifies anything under `docs/`.
+- **Stage 20-6 (`AGENTS.md` update for the new pipeline shape)**
+  — the canonical pipeline-shape doc is `parent-prompt.ts` (with
+  module-level comments in `runner.ts` and `index.ts` refreshed
+  during this plan's sweeps). `AGENTS.md` will absorb the
+  pipeline section the next time it's edited for related work.
+
+Why "complete with deferrals" rather than "in progress":
+
+The two load-bearing artifacts — `@planner` and `@curator` — are
+shipped, wired, tested, and one of them is live-validated. The
+deferred items are either:
+
+- Operator-driven product decisions (periodic curator → dropped),
+- Format chores that don't block the new artifacts from working
+  on go-forward work (frontmatter backfill),
+- Or follow-ups that surface naturally (live smoke, AGENTS.md
+  update).
+
+Keeping the plan in `active/` would imply ongoing work; moving
+it to `completed/` with this log makes the state observable.

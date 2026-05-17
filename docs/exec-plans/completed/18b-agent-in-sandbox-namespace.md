@@ -1,6 +1,6 @@
 # Plan 18b — Sub-agents run inside the Namespace sandbox
 
-- **Status:** Not started
+- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** ADR 0015 ("sub-agents run in the sandbox they
   operate on") for the `namespace-devbox` backend. After this plan
   ships, a `sandbox:namespace`-labelled dispatch executes
@@ -973,3 +973,40 @@ Successful smoke result (instance `fgb1r0h5tjmum`):
 Instance destroyed after verification. End-to-end vault-native
 path confirmed working; the namespace-create.sh rewrite + the
 in-VM wrapper update follow the smoke shape verbatim.
+
+### 2026-05-17 — Plan close-out
+
+Shipped via PR #30 (implementation) + PR #31 (post-merge sweep
+to scrub bug-archaeology comments). End-to-end smoke EDU-25 ran
+the full `@sandbox → @planner → @coder → @ci` pipeline inside a
+Namespace microVM with vault-injected credentials; PR opened in
+the target repo, instance destroyed cleanly, ~2m08s
+end-to-end.
+
+What landed:
+
+- `docker/symphony-agent.Dockerfile` — Debian slim + claude CLI
+  - git + gh + non-root `symphony` user (uid 1000, required
+    because `claude --dangerously-skip-permissions` refuses uid 0).
+- `namespace-create.sh` rewrite — API-direct CreateInstance
+  with vault `envVars[].fromSecretId` injection. No secret
+  ever touches the daemon's filesystem or argv.
+- `clone-and-checkout.sh` + `dispatch.sh` — in-VM helpers
+  uploaded per-dispatch alongside the daemon's current skills
+  tree. SKILL.md updates ship with the daemon, not with the
+  image.
+- Parent-prompt kind-aware routing for `namespace-devbox`
+  (Bash dispatch via `nsc ssh --container_name agent -T -- bash
+/opt/symphony/dispatch.sh <name> '<inputs>'`).
+- Hardcoded constants for v1 (image ref, secret IDs); operator-
+  side prerequisites documented in `namespace-create.sh`'s
+  header. Migrate to `symphony.yaml` when there's a second
+  operator.
+
+What was deferred (tracked elsewhere or accepted as v1 scope):
+
+- `nsc ssh` exit-code propagation — tech-debt-tracker entry
+  exists from Plan 17a; still binary pass/fail in v1.
+- Stream-json output mode for the in-VM `claude -p` invocation —
+  text mode keeps the parent's Bash-tool path simple; revisit
+  if dashboard observability becomes a need.
