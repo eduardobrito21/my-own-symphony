@@ -33,9 +33,45 @@ describe('mapSdkMessage — system messages', () => {
     expect(got).toEqual([{ kind: 'notification', message: 'status: compacting', at: AT }]);
   });
 
-  it('drops other system subtypes (compact_boundary, task_notification, etc.)', () => {
+  it('drops compact_boundary and other irrelevant system subtypes', () => {
     expect(mapSdkMessage({ type: 'system', subtype: 'compact_boundary' }, CTX)).toEqual([]);
-    expect(mapSdkMessage({ type: 'system', subtype: 'task_notification' }, CTX)).toEqual([]);
+    expect(mapSdkMessage({ type: 'system', subtype: 'plugin_install' }, CTX)).toEqual([]);
+  });
+
+  it('surfaces task_started as a sub-agent start notification (Plan 18a)', () => {
+    const got = mapSdkMessage(
+      { type: 'system', subtype: 'task_started', description: 'provision dev env' },
+      CTX,
+    );
+    expect(got).toEqual([
+      { kind: 'notification', message: '[sub-agent start] provision dev env', at: AT },
+    ]);
+  });
+
+  it('surfaces task_notification as a sub-agent terminal notification (Plan 18a)', () => {
+    const completed = mapSdkMessage(
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        status: 'completed',
+        summary: 'SandboxHandle emitted',
+      },
+      CTX,
+    );
+    expect(completed).toEqual([
+      { kind: 'notification', message: '[sub-agent completed] SandboxHandle emitted', at: AT },
+    ]);
+
+    const failed = mapSdkMessage(
+      { type: 'system', subtype: 'task_notification', status: 'failed', summary: 'oom' },
+      CTX,
+    );
+    expect(failed).toEqual([{ kind: 'notification', message: '[sub-agent failed] oom', at: AT }]);
+  });
+
+  it('drops task_progress + task_updated to keep the stream readable', () => {
+    expect(mapSdkMessage({ type: 'system', subtype: 'task_progress' }, CTX)).toEqual([]);
+    expect(mapSdkMessage({ type: 'system', subtype: 'task_updated' }, CTX)).toEqual([]);
   });
 
   it('drops init with empty session_id (defensive — never observed in real SDK)', () => {

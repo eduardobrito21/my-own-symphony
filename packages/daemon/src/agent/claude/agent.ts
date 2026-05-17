@@ -40,6 +40,7 @@ import {
   query as sdkQuery,
   tool,
   createSdkMcpServer,
+  type AgentDefinition,
   type Query,
   type ThinkingConfig,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -87,6 +88,15 @@ export interface ClaudeAgentArgs {
   readonly maxModelRoundTrips?: number;
   /** Optional SDK cost guard for one query call. */
   readonly maxBudgetUsd?: number;
+  /**
+   * Optional native SDK sub-agent definitions (Plan 18a). When set, the
+   * parent agent gains the built-in `Agent` tool and can dispatch
+   * each entry as a sub-agent with its own context window and tool
+   * scope. Keys become `subagent_type` selectors the parent agent
+   * passes to the `Agent` tool. When omitted, the agent runs as a
+   * single context (the pre-18a behaviour).
+   */
+  readonly agents?: Record<string, AgentDefinition>;
   /** Test seam — defaults to the real SDK `query`. */
   readonly queryFn?: QueryFn;
   /** Test seam — defaults to `() => new Date()`. */
@@ -104,6 +114,7 @@ export class ClaudeAgent implements AgentRunner {
   private readonly queryFn: QueryFn;
   private readonly now: () => Date;
   private readonly mcpServer: ReturnType<typeof createSdkMcpServer>;
+  private readonly agents: Record<string, AgentDefinition> | undefined;
 
   constructor(args: ClaudeAgentArgs) {
     this.linearClient = args.linearClient;
@@ -116,6 +127,7 @@ export class ClaudeAgent implements AgentRunner {
     this.queryFn = args.queryFn ?? sdkQuery;
     this.now = args.now ?? (() => new Date());
     this.mcpServer = this.buildLinearMcpServer();
+    this.agents = args.agents;
   }
 
   /**
@@ -183,6 +195,18 @@ export class ClaudeAgent implements AgentRunner {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let q: Query;
       try {
+        // Plan 18a: when `agents` is supplied, the parent agent's
+        // tool list also includes the built-in `Agent` tool so it can
+        // dispatch sub-agents. Pre-18a callers (no `agents`) keep the
+        // single-context behaviour. `forwardSubagentText: true` makes
+        // sub-agent text appear in the parent message stream so the
+        // post-hoc SandboxHandle / CoderResult / CIResult scanners can
+        // find structured JSON in each sub-agent's segment.
+        const hasSubagents = this.agents !== undefined && Object.keys(this.agents).length > 0;
+        const parentTools = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'];
+        if (hasSubagents) parentTools.push('Agent');
+        const parentAllowed = [...parentTools, 'mcp__linear__linear_graphql'];
+
         q = this.queryFn({
           prompt: input.prompt,
           options: {
@@ -195,16 +219,10 @@ export class ClaudeAgent implements AgentRunner {
             // of `allowedTools` (see SDK sdk.d.ts:1216) — the prior
             // setting silently forced the agent to hallucinate sandbox
             // and coder outputs because it had no shell to run them in.
-            tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'],
-            allowedTools: [
-              'Bash',
-              'Read',
-              'Write',
-              'Edit',
-              'Glob',
-              'Grep',
-              'mcp__linear__linear_graphql',
-            ],
+            // Plan 18a adds `Agent` here when sub-agents are defined.
+            tools: parentTools,
+            allowedTools: parentAllowed,
+            ...(hasSubagents && { agents: this.agents, forwardSubagentText: true }),
             cwd: input.workspacePath,
             abortController,
             ...(this.thinking !== undefined && { thinking: this.thinking }),

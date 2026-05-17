@@ -105,6 +105,29 @@ function mapSystemMessage(
     const status = readString(msg, 'status') ?? 'idle';
     return [{ kind: 'notification', message: `status: ${status}`, at }];
   }
+
+  // Plan 18a: surface SDK sub-agent lifecycle events as `notification`
+  // entries so dashboards/logs show stage boundaries. We deliberately
+  // keep the mapping coarse — full nested-transcript rendering is
+  // future work. `forwardSubagentText: true` (set in ClaudeAgent for
+  // 18a) ensures the sub-agents' own assistant text streams through
+  // `mapAssistantMessage` as usual; these task_* messages add the
+  // boundary markers around that text.
+  if (subtype === 'task_started') {
+    const description = readString(msg, 'description') ?? '';
+    return [{ kind: 'notification', message: `[sub-agent start] ${description}`, at }];
+  }
+  if (subtype === 'task_notification') {
+    const status = readString(msg, 'status') ?? '?';
+    const summary = readString(msg, 'summary') ?? '';
+    return [{ kind: 'notification', message: `[sub-agent ${status}] ${summary}`, at }];
+  }
+  if (subtype === 'task_progress' || subtype === 'task_updated') {
+    // Progress / updated fire frequently; drop to keep the event
+    // stream readable. Operators who want detail can enable verbose
+    // SDK logging.
+    return [];
+  }
   return [];
 }
 
