@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
 # clone-and-checkout.sh — clone the target repo into /workspace
-# inside the agent container, then check out the work branch.
+# inside the bare Namespace microVM, then check out the work branch.
 #
 # Uploaded by namespace-create.sh at @sandbox provision time and
 # executed via:
 #
-#   nsc ssh <id> --container_name agent -T -- \
-#     /opt/symphony/clone-and-checkout.sh <REPO_URL> <DEFAULT_BRANCH> <BRANCH>
+#   nsc ssh <id> -T -- \
+#     bash /opt/symphony/clone-and-checkout.sh <REPO_URL> <DEFAULT_BRANCH> <BRANCH>
+#   <<<EOF
+#   GITHUB_TOKEN=<value>
+#   EOF
 #
 # Why an uploaded script instead of inline `bash -c '<commands>'`:
-# `nsc ssh --container_name` invokes the command via the container
-# runtime's exec primitive (not a shell) and splits the command
-# string on whitespace to form argv. Inlining a multi-statement
-# script as one argv item doesn't work — the first whitespace-bounded
-# token (e.g. `set`) is taken as the executable. An uploaded script
-# invoked by absolute path gives a clean four-element argv:
-# [script-path, repo, default-branch, branch].
+# `nsc ssh` invokes the command via Namespace's command-service
+# (not a shell) and splits the command string on whitespace to form
+# argv. Inlining a multi-statement script as one argv item doesn't
+# work — the first whitespace-bounded token (e.g. `set`) is taken
+# as the executable. An uploaded script invoked by absolute path
+# gives a clean four-element argv: [script-path, repo,
+# default-branch, branch].
 #
 # Args:
 #   $1 - repo URL (e.g. https://github.com/foo/bar.git)
 #   $2 - default branch (e.g. main)
 #   $3 - work branch
 #
-# Env (vault-injected into the agent container):
-#   GITHUB_TOKEN - optional; embedded inline in the clone URL so
-#                  HTTPS auth works for private repos without ever
-#                  landing on argv or in .git/config.
+# Env / stdin (Plan 18c):
+#   GITHUB_TOKEN can come from either:
+#     - the current shell's env (if a caller pre-exported it), OR
+#     - the first stdin line in the form `GITHUB_TOKEN=<value>`.
+#   The script reads stdin only if env is empty; either way the
+#   token never lands on argv or in .git/config.
 
 set -euo pipefail
 
@@ -33,8 +38,21 @@ REPO_URL="${1:?REPO_URL is required (positional arg 1)}"
 DEFAULT_BRANCH="${2:?DEFAULT_BRANCH is required (positional arg 2)}"
 BRANCH="${3:?BRANCH is required (positional arg 3)}"
 
-# /workspace is the container's WORKDIR (per the Dockerfile) and the
-# standard mount point Symphony's downstream sub-agents expect.
+# If GITHUB_TOKEN isn't already in env, drain stdin looking for it.
+# Other KEY=value lines (forward-compat) are exported too. EOF or an
+# empty stdin both result in GITHUB_TOKEN staying unset, which is the
+# correct behavior for a public repo.
+if [ -z "${GITHUB_TOKEN:-}" ] && [ ! -t 0 ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in
+      *=*) export "$line" ;;
+    esac
+  done
+fi
+
+# /workspace is the well-known root namespace-create.sh creates and
+# chowns to the symphony user; this script runs from there.
 WORKTREE="/workspace"
 git config --global --add safe.directory "$WORKTREE"
 
@@ -42,15 +60,15 @@ git config --global --add safe.directory "$WORKTREE"
 # fetch authenticates without us threading it through argv or
 # .git/config. We strip it back out via `git remote set-url` once
 # the working copy exists; future fetches/pushes use the credential
-# from the container's env (Plan 18b vault injection).
+# from the agent's env (delivered per-stage by dispatch.sh's stdin
+# in Plan 18c).
 if [ -z "${GITHUB_TOKEN:-}" ]; then
   CLONE_URL="$REPO_URL"
 else
   CLONE_URL="$(printf '%s' "$REPO_URL" | sed "s|https://|https://x-access-token:${GITHUB_TOKEN}@|")"
 fi
 
-# The container's WORKDIR is /workspace and the Dockerfile creates
-# it empty. Two cases:
+# Two cases:
 #
 #   - First dispatch: /workspace is empty → `git clone` clones into
 #     it (git accepts an existing empty target dir).

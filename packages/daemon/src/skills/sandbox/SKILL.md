@@ -144,66 +144,61 @@ missing-script path.
 - `local-create.sh` reuses the daemon's per-issue workspace
   (which is its cwd) and fast-forwards the default branch. Safe
   to re-run.
-- `namespace-create.sh` passes `--unique_tag symphony-<identifier>`
-  to `nsc create`, which is exactly idempotent: a second call
-  with the same tag returns the same instance id. Validated
-  2026-05-17.
+- `namespace-create.sh` POSTs `CreateInstance` with
+  `uniqueTag: symphony-<identifier>` in the request body, which
+  is exactly idempotent: a second call with the same tag returns
+  the same instance id. Re-dispatch on the same issue reuses the
+  microVM (bootstrap is a no-op the second time).
 
-## Plan 18b — vault-native namespace dispatches
+## Plan 18c — bare microVM namespace dispatches
 
 For `namespace` backends, `namespace-create.sh` calls the
-Namespace API (not the `nsc create` CLI) to provision an instance
-with one `agent` container. The container is started from the
-operator's pre-built `symphony-agent` image (carries `claude`
-CLI + `git` + `gh` + base tools) and has its env populated from
-the workspace vault via `envVars[].fromSecretId`:
+Namespace API to provision a **bare microVM** (Wolfi 6.16, kernel
+6.16.9, root by default, full capabilities, seccomp off, native
+docker daemon already running). No container layer. The
+CreateInstance POST body has no `containers` field.
 
-| Container env var   | Source                       |
-| ------------------- | ---------------------------- |
-| `ANTHROPIC_API_KEY` | Namespace vault `sec_...` ID |
-| `GITHUB_TOKEN`      | Namespace vault `sec_...` ID |
+After the microVM is reachable, the script runs an idempotent
+bootstrap that:
 
-Secrets are platform-injected at container start. They never
-touch the daemon's filesystem, the VM's filesystem, or any argv.
+1.  Creates a non-root `symphony` user (uid 1000). `claude
+--dangerously-skip-permissions` hard-refuses uid 0; the
+    user exists only to satisfy that check.
+2.  Installs the claude CLI as the symphony user via the standard
+    `claude.ai/install.sh` installer.
+3.  Verifies docker is running (Plan 21's `@env-up` prereq).
 
-After the instance is up, `namespace-create.sh` uploads the
-daemon's current Symphony bundle into the agent container at
-`/opt/symphony/`:
+Then it uploads Symphony's per-dispatch bundle to `/opt/symphony/`:
 
-| Path in container           | What                                                            |
+| Path in microVM             | What                                                            |
 | --------------------------- | --------------------------------------------------------------- |
 | `/opt/symphony/dispatch.sh` | The in-VM wrapper the daemon invokes via `nsc ssh`              |
 | `/opt/symphony/skills/`     | The daemon's `packages/daemon/src/skills/` (tarred + extracted) |
 
 Skills + wrapper are uploaded per-dispatch (source-versioned by
-the daemon) rather than baked into the image — SKILL.md changes
-ship with the daemon, not with an image rebuild.
+the daemon) — SKILL.md changes ship with the daemon, not with a
+microVM image rebuild.
 
-The `@planner` / `@coder` / `@ci` sub-agents run **inside the
-agent container** via `claude` CLI invoked by the wrapper. The
-daemon's parent agent dispatches them by Bash'ing
-`nsc ssh "$id" --container_name agent -T -- /opt/symphony/dispatch.sh <name> '<inputs>'`.
+The `@planner` / `@coder` / `@curator` / `@ci` sub-agents run
+**inside the microVM** via the `claude` CLI invoked by the
+wrapper. Credentials reach the wrapper over `nsc ssh -T`'s stdin
+in a heredoc the parent agent constructs (see `SECURITY.md` for
+the dispatch template). The daemon's parent agent dispatches them
+by Bash'ing
+`nsc ssh "$id" -T -- bash /opt/symphony/dispatch.sh <name> '<inputs>' <<EOF ... EOF`.
 
 `@sandbox` itself stays in the daemon (it can't run inside the
 VM it's provisioning). ADR 0015 is the design rationale.
 
 ### Operator-side prerequisites (one-time per workspace)
 
-1.  Build + push the agent image to your Namespace workspace
-    registry:
+1.  `nsc login` on the daemon host (Namespace CLI authenticated).
 
-        nsc build docker -f symphony-agent.Dockerfile \
-                  --name symphony-agent --push
-
-2.  Create vault secrets in the Namespace UI named
-    `ANTHROPIC_API_KEY` and `GITHUB_TOKEN`. Note the `sec_...`
-    object ids.
-
-3.  Paste the image ref + secret ids into the constants at the
-    top of `namespace-create.sh` (`NAMESPACE_IMAGE_REF`,
-    `NAMESPACE_SECRET_ANTHROPIC_API_KEY`,
-    `NAMESPACE_SECRET_GITHUB_TOKEN`). Per-workspace config
-    plumbing lives there until we have a second operator.
+That's it. No image to build, no vault secrets to register, no
+hardcoded IDs to paste anywhere. The daemon's own process env
+already has `ANTHROPIC_API_KEY` (and optionally `GITHUB_TOKEN`)
+— those forward per-stage over the stdin heredoc the parent
+agent's dispatch template includes.
 
 ## Why a script rather than agent-inline shell?
 
