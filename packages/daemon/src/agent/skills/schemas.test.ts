@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CoderResultSchema,
+  CuratorResultSchema,
   parseCoderResult,
+  parseCuratorResult,
   parseSandboxHandle,
   safeParseCoderResult,
+  safeParseCuratorResult,
   safeParseSandboxHandle,
   SandboxHandleSchema,
 } from './schemas.js';
@@ -192,6 +195,110 @@ describe('CoderResultSchema', () => {
 
     it('returns success: false on invalid input', () => {
       const result = safeParseCoderResult({ changed_files: 123 });
+      expect(result.success).toBe(false);
+    });
+  });
+});
+
+describe('CuratorResultSchema', () => {
+  it('parses an audited result with auto_fixes and flags', () => {
+    const result = CuratorResultSchema.safeParse({
+      decision: 'audited',
+      summary: 'Stamped one plan completed; flagged a stale cross-ref.',
+      auto_fixes: ['docs/exec-plans/completed/22-foo.md'],
+      flags: [
+        {
+          rule: 'cross-references',
+          file: 'docs/PLANS.md',
+          line: 47,
+          concern: 'Reference to Plan 99 — no such plan.',
+          suggested_fix: 'Remove the reference or correct the number.',
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('parses a skipped result with empty arrays', () => {
+    const result = CuratorResultSchema.safeParse({
+      decision: 'skipped',
+      summary: 'No harness-relevant files in changeset.',
+      auto_fixes: [],
+      flags: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('allows a flag without a line number', () => {
+    // `line` is best-effort — the curator omits it when it can't
+    // pin a specific line.
+    const result = CuratorResultSchema.safeParse({
+      decision: 'audited',
+      summary: 'One flag.',
+      auto_fixes: [],
+      flags: [
+        {
+          rule: 'index-parity',
+          file: 'docs/design-docs/index.md',
+          concern: 'Three docs missing from index.',
+          suggested_fix: 'Add entries for foo.md, bar.md, baz.md.',
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an unknown decision value', () => {
+    const result = CuratorResultSchema.safeParse({
+      decision: 'maybe',
+      summary: 'x',
+      auto_fixes: [],
+      flags: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a flag missing required fields', () => {
+    const result = CuratorResultSchema.safeParse({
+      decision: 'audited',
+      summary: 'x',
+      auto_fixes: [],
+      flags: [
+        { rule: 'x', file: 'y.md' }, // missing concern + suggested_fix
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  describe('parseCuratorResult', () => {
+    it('returns the parsed result on valid input', () => {
+      const result = parseCuratorResult({
+        decision: 'skipped',
+        summary: 'nothing to do',
+        auto_fixes: [],
+        flags: [],
+      });
+      expect(result.decision).toBe('skipped');
+    });
+
+    it('throws on invalid input', () => {
+      expect(() => parseCuratorResult({})).toThrow();
+    });
+  });
+
+  describe('safeParseCuratorResult', () => {
+    it('returns success: true on valid input', () => {
+      const result = safeParseCuratorResult({
+        decision: 'audited',
+        summary: 's',
+        auto_fixes: [],
+        flags: [],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('returns success: false on invalid input', () => {
+      const result = safeParseCuratorResult({ decision: 'audited' });
       expect(result.success).toBe(false);
     });
   });

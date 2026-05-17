@@ -6,9 +6,10 @@
 // graceful shutdown.
 //
 // The PipelineAgentRunner orchestrates the @sandbox → @planner →
-// @coder → @ci stages via the Claude Agent SDK running in the daemon
-// process (or, for namespace-backed sandboxes, by Bash-dispatching
-// `claude -p` inside the agent container — see Plan 18b).
+// @coder → @curator → @ci stages via the Claude Agent SDK running
+// in the daemon process (or, for namespace-backed sandboxes, by
+// Bash-dispatching `claude -p` inside the agent container — see
+// Plan 18b).
 //
 // Usage:
 //   symphony                          # ./symphony.yaml
