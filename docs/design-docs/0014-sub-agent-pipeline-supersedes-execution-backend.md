@@ -1,6 +1,6 @@
 # 0014 — Sub-agent pipeline + skill-driven provisioning supersedes ExecutionBackend, agent-in-pod, and broker transport
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-05-17 — Plan 16 shipped end-to-end; validated against Linear EDU-13)
 - **Date:** 2026-05-17
 - **Supersedes:** ADR 0011 (agent-in-pod + ExecutionBackend seam) in
   full; ADR 0012 (Namespace as production ExecutionBackend) in full;

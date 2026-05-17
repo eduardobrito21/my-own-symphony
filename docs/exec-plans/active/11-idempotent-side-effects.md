@@ -1,37 +1,56 @@
 # Plan 11 — Idempotent side effects (slim)
 
-- **Status:** 📝 Drafted (reshaped 2026-04-30, scope reduced
-  after ADR 0012's Namespace pivot)
-- **Reshape note:** the original Plan 11 used `before_run` hook
-  templates + a `symphony-pr-ensure` shim baked into the docker
-  base image, both of which assumed LocalDockerBackend's
-  in-pod-container model. With ADR 0012 making Namespace the
-  v1 production backend (the agent runs directly on a fresh VM,
-  not inside a baked container image), the wrapper-script
-  approach no longer fits — there is no shared base image to
-  bake shims into across dispatches. The slim plan keeps the
-  three idempotency properties that actually matter and drops
-  the wrapper machinery; enforcement moves into the agent's
-  prompt template + a small no-op-transition guard at the
-  daemon's tracker layer.
+- **Status:** 📝 Drafted (framing reshaped 2026-05-17 for the
+  sub-agent pipeline; Steps below still reference pre-Plan-15
+  files and need re-targeting before execution — see "Reshape
+  note 2026-05-17" below).
+- **Reshape note 2026-05-17 (post-ADR-0014):** the previous
+  reshape (2026-04-30) was rationalized against ADR 0012's
+  Namespace backend, which ADR 0014 has since superseded. The
+  three idempotency properties this plan exists to protect are
+  unchanged; the surfaces that implement them have moved:
+  - **Branch reuse** is already partially implemented inside
+    the bundled `@sandbox` skill at
+    `packages/daemon/src/skills/sandbox/SKILL.md` (the
+    `git checkout "${branch}" 2>/dev/null || git checkout -b
+"${branch}" "${default_branch}"` block we shipped on
+    2026-05-17). A re-dispatch lands on the same branch from a
+    freshly fast-forwarded default. Confirm + test (no
+    `cloneAndCheckout` to modify — that file was deleted in
+    Plan 15).
+  - **Marker-comment dedup** is owned by the pipeline
+    orchestration prompt at
+    `packages/daemon/src/agent/pipeline/prompt.ts`'s Stage 3,
+    not by per-repo `workflow.md`. The prompt currently
+    instructs the agent to post a comment unconditionally; it
+    needs the marker grep before posting.
+  - **No-op transition guard** still belongs at
+    `packages/daemon/src/tracker/linear/client.ts`. Unchanged
+    from the prior reshape.
+- **Reshape note 2026-04-30 (historical, now stale):** the
+  original Plan 11 used `before_run` hook templates +
+  a `symphony-pr-ensure` shim baked into the docker base image,
+  both of which assumed LocalDockerBackend's in-pod-container
+  model. ADR 0012's Namespace pivot retired the wrapper-script
+  approach. ADR 0014 has since retired both ExecutionBackends
+  entirely — see the 2026-05-17 note above for the current
+  surfaces.
 - **Spec sections:** none directly (operational hygiene on top
   of the spec's dispatch model).
-- **Layers touched:** per-repo `workflow.md` template (prompt
-  guidance for marker-based comment dedup),
+- **Layers touched (current):** `packages/daemon/src/agent/pipeline/prompt.ts`
+  (marker-comment dedup instructions in Stage 3),
+  `packages/daemon/src/skills/sandbox/SKILL.md` (branch reuse
+  — already partially done; needs verification + tests),
   `packages/daemon/src/tracker/linear/client.ts` (no-op
-  transitions when the issue is already in the target state),
-  `packages/agent-runtime/src/entrypoint.ts` (branch reuse
-  logic in the existing `cloneAndCheckout`).
+  transitions when the issue is already in the target state).
 - **ADRs referenced:** 0009 (multi-project — `branch_prefix`
-  config), 0011 (agent-in-pod), 0012 (Namespace backend —
-  ephemeral VMs eliminate the "stale workspace state" surface
-  the original plan also addressed).
-- **Comes AFTER:** Plan 14 (the Namespace backend), so that
-  this plan's ergonomic choices target the actual production
-  shape.
-- **Comes BEFORE:** Plan 12 (end-to-end PR demo — its
-  "re-trigger same issue, no duplicate" verification depends
-  on this plan's hygiene).
+  config), 0014 (sub-agent pipeline — supersedes ADRs 0011/0012
+  this plan previously cited).
+- **Comes AFTER:** Plan 16 (sub-agent pipeline chassis — owns
+  the prompt and skill surfaces this plan modifies).
+- **Comes BEFORE:** Plan 19 (`@ci` skill — its "no duplicate
+  PR" property is the fourth idempotency case this plan should
+  cover by the time `@ci` ships).
 
 ## Goal
 
