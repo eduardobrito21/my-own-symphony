@@ -47,7 +47,17 @@ export function normalizeFullIssue(raw: FullIssue): Issue {
     state: raw.state.name,
     branchName: raw.branchName,
     url: raw.url,
-    labels: raw.labels.nodes.map((n) => n.name.toLowerCase()),
+    // Linear represents `sandbox:namespace`-style labels as a parent/
+    // child pair (parent="sandbox", child="namespace"). The API returns
+    // only the leaf as `name`. We rejoin parent + child with `:` so
+    // downstream code (and the @sandbox dispatcher's matching) sees
+    // the original colon-prefixed form. Plain labels with no parent
+    // pass through as-is.
+    labels: raw.labels.nodes.map((n) => {
+      const child = n.name.toLowerCase();
+      const parent = n.parent?.name.toLowerCase();
+      return parent !== undefined && parent !== '' ? `${parent}:${child}` : child;
+    }),
     blockedBy: raw.inverseRelations.nodes
       // Linear's schema doesn't accept a filter argument on
       // `inverseRelations`, so we narrow to "blocks" client-side.

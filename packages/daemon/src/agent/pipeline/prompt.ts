@@ -129,10 +129,12 @@ development environment.
 - identifier: ${identifier}
 - labels: ${labelLine}
 
-The \`labels\` input drives @sandbox's backend selection. A
-\`sandbox:<backend>\` label (e.g. \`sandbox:namespace\`) selects a
-backend; with no such label, fall back to the operator default
-(\`local\`).
+The \`labels\` input drives @sandbox's backend selection. A bare
+backend label (\`local\`, \`namespace\`, or \`aws\`) — or the
+prefixed form (\`sandbox:namespace\` etc.) — selects a backend.
+With no such label, fall back to the operator default (\`local\`).
+Linear stores labels as flat strings, so a label named simply
+\`namespace\` IS the selector.
 
 The @sandbox skill lives on disk at:
 

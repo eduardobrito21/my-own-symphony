@@ -26,15 +26,29 @@ this skill's directory on disk. The scripts live at
 
 ## Step 0 — Pick the backend
 
-Scan `labels` for any value matching `sandbox:<backend>`. Known
-backends: `local`, `namespace`, `aws`.
+Scan `labels` for a backend selector. Known backends: `local`,
+`namespace`, `aws`. A label counts as a selector if it is:
 
-| `sandbox:*` matches found | Action                                                                                    |
-| ------------------------- | ----------------------------------------------------------------------------------------- |
-| 0                         | Use `local` (operator default).                                                           |
-| 1, value in known set     | Use that backend.                                                                         |
-| 1, value NOT in known set | **Fail loud.** Print: `unknown sandbox backend '<value>' — known: local, namespace, aws`. |
-| 2+                        | **Fail loud.** Print: `multiple sandbox:* labels found: <list>`.                          |
+- **A bare backend name** — `local`, `namespace`, or `aws`
+  (preferred; matches Linear's flat label model).
+- **A prefixed name** — `sandbox:local`, `sandbox:namespace`, or
+  `sandbox:aws` (still accepted for clarity-conscious projects).
+
+Selection rule:
+
+| Distinct backend selectors found | Action                                                            |
+| -------------------------------- | ----------------------------------------------------------------- |
+| 0                                | Use `local` (operator default).                                   |
+| 1                                | Use that backend.                                                 |
+| 2+                               | **Fail loud.** Print: `conflicting backend labels found: <list>`. |
+
+Other labels (e.g. `priority:high`, project tags) are ignored.
+
+Note: Linear stores labels as flat strings without prefixes, so a
+user who creates a label called simply `namespace` in their Linear
+workspace gets the namespace backend without further configuration.
+The prefixed `sandbox:*` form is provided for cases where a bare
+name like `namespace` would collide with another label's meaning.
 
 ## Step 1 — Run the create script
 
