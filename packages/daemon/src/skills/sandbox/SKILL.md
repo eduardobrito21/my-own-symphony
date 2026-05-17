@@ -10,6 +10,34 @@ You are executing the `@sandbox` skill. Your job is small:
 
 The script does the real work. You are the dispatcher.
 
+> **CRITICAL — you run inside the daemon's process. Do NOT modify
+> any file on the daemon's filesystem.** Unlike `@planner`,
+> `@coder`, and `@ci` (which run inside a remote sandbox in Plan
+> 18b mode), `@sandbox` itself executes within the daemon's
+> process and has filesystem access to the daemon's source tree.
+> If a script fails:
+>
+> 1. Capture the last `[<backend>-create] ERROR: ...` line from
+>    stderr.
+> 2. Emit a SandboxHandle JSON with `id: ""`, `kind: "failed"`,
+>    and the error string in the `teardown.script` field (no
+>    sandbox was created, but the validator still gets a parseable
+>    structure). The pipeline closes out with a Linear failure
+>    comment.
+> 3. **Stop. Do NOT** read or edit `$SKILL_DIR/scripts/*.sh`, do
+>    NOT run `git`, do NOT use `Bash` to redirect into files, do
+>    NOT try to "fix" the script. Bugs in the script are the
+>    operator's concern, not yours — surface them via the failure
+>    handle and exit.
+>
+> Failure caught during EDU-21 (2026-05-17): the namespace-create
+> script had a path-calc bug; the agent went into debugging mode,
+> read the script, traced the bug, and edited the daemon's source
+> tree to fix it via `bash` + sed-style redirects. That's exactly
+> the EDU-18 host-filesystem-leak class — possible here because
+> `@sandbox` deliberately stays in the daemon (Plan 18b Decision
+> 8). The fix is this rule: stay in your lane.
+
 ## Input
 
 You will receive (from the parent agent's Stage 1 input block):
@@ -126,6 +154,62 @@ missing-script path.
   to `nsc create`, which is exactly idempotent: a second call
   with the same tag returns the same instance id. Validated
   2026-05-17.
+
+## Plan 18b — vault-native namespace dispatches
+
+For `namespace` backends, `namespace-create.sh` calls the
+Namespace API (not the `nsc create` CLI) to provision an instance
+with one `agent` container. The container is started from the
+operator's pre-built `symphony-agent` image (carries `claude`
+CLI + `git` + `gh` + base tools) and has its env populated from
+the workspace vault via `envVars[].fromSecretId`:
+
+| Container env var   | Source                       |
+| ------------------- | ---------------------------- |
+| `ANTHROPIC_API_KEY` | Namespace vault `sec_...` ID |
+| `GITHUB_TOKEN`      | Namespace vault `sec_...` ID |
+
+Secrets are platform-injected at container start. They never
+touch the daemon's filesystem, the VM's filesystem, or any argv.
+
+After the instance is up, `namespace-create.sh` uploads the
+daemon's current Symphony bundle into the agent container at
+`/opt/symphony/`:
+
+| Path in container           | What                                                            |
+| --------------------------- | --------------------------------------------------------------- |
+| `/opt/symphony/dispatch.sh` | The in-VM wrapper the daemon invokes via `nsc ssh`              |
+| `/opt/symphony/skills/`     | The daemon's `packages/daemon/src/skills/` (tarred + extracted) |
+
+Skills + wrapper are uploaded per-dispatch (source-versioned by
+the daemon) rather than baked into the image — SKILL.md changes
+ship with the daemon, not with an image rebuild.
+
+The `@planner` / `@coder` / `@ci` sub-agents run **inside the
+agent container** via `claude` CLI invoked by the wrapper. The
+daemon's parent agent dispatches them by Bash'ing
+`nsc ssh "$id" --container_name agent -T -- /opt/symphony/dispatch.sh <name> '<inputs>'`.
+
+`@sandbox` itself stays in the daemon (it can't run inside the
+VM it's provisioning). ADR 0015 is the design rationale.
+
+### Operator-side prerequisites (one-time per workspace)
+
+1.  Build + push the agent image to your Namespace workspace
+    registry:
+
+        nsc build docker -f symphony-agent.Dockerfile \
+                  --name symphony-agent --push
+
+2.  Create vault secrets in the Namespace UI named
+    `ANTHROPIC_API_KEY` and `GITHUB_TOKEN`. Note the `sec_...`
+    object ids.
+
+3.  Paste the image ref + secret ids into the constants at the
+    top of `namespace-create.sh` (`NAMESPACE_IMAGE_REF`,
+    `NAMESPACE_SECRET_ANTHROPIC_API_KEY`,
+    `NAMESPACE_SECRET_GITHUB_TOKEN`). Per-workspace config
+    plumbing lives there until we have a second operator.
 
 ## Why a script rather than agent-inline shell?
 
