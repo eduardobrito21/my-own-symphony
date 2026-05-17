@@ -1,6 +1,6 @@
 # Plan 17a — Multi-backend `@sandbox` dispatcher (Namespace + local)
 
-- **Status:** In progress
+- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** ADR 0014's "the @infra agent's skill picks per
   dispatch" framing for the platform choice between local docker,
   Namespace microVM, and (placeholder) AWS.
@@ -631,3 +631,20 @@ items (in priority order, for whoever picks them up):
    (today's smoke only exercised `local-shell`). The `nsc` CLI
    surface is proven via the standalone 2026-05-17 probe but
    never run through the daemon's full pipeline.
+
+### 2026-05-17 — Closed
+
+Plan moved to `completed/`. Final accounting against the
+"Remaining items" list above:
+
+| Item                                 | Disposition                                                                                                                                                                                                     |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Plan 17b — namespace creds        | Plan 17b draft exists in `active/`; tracked there.                                                                                                                                                              |
+| 2. Plan 18 — real @coder + @tester   | Its own future plan. Plan 18a (SDK native sub-agents) landed as a precondition.                                                                                                                                 |
+| 3. Plan 19 — @ci on remote sandboxes | Its own future plan; framing locked in by ADR 0015 (sub-agents run in their sandbox).                                                                                                                           |
+| 4. Prompt size pruning               | **Resolved by Plan 18a** — parent prompt dropped 19,144 → 4,286 chars; first-attempt 429s gone.                                                                                                                 |
+| 5. Namespace end-to-end smoke        | Moved to Plan 18b's scope. The MVP @coder bails on remote sandbox kinds; a Namespace dispatch today wouldn't produce a PR by design. Becomes meaningful once 18b lands the agent-in-sandbox split per ADR 0015. |
+
+Definition of done items all green. Open questions all resolved
+in the decision log. Smoke succeeded twice (EDU-15 under Plan
+17a's MVP, EDU-16 under Plan 18a's sub-agent refactor).
