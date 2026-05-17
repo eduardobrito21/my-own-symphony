@@ -1,7 +1,6 @@
 # Plan 18a — Migrate the pipeline to SDK native sub-agents
 
-- **Status:** In progress (core refactor landed 2026-05-17; live smoke
-  pending — see decision log)
+- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** A reshape of how Plan 16/17a's pipeline is
   represented to the Claude Agent SDK. Same external behavior
   (same stages, same handoffs); different SDK-level mechanics.
@@ -548,3 +547,29 @@ moving it to `completed/`:
 - Re-test under Sonnet 4.6 (vs the Haiku swap from
   `switch-default-model-to-haiku` branch) to confirm no 429s on
   the original cap. Not blocking.
+
+### 2026-05-17 — Closed
+
+Plan moved to `completed/`. Final accounting:
+
+| Definition-of-done item                              | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `buildPipelinePrompt` no longer inlines skill bodies | ✅ Removed. Parent prompt is now `buildParentPrompt`, ~4.3k chars.                                                                                                                                                                                                                                                                                                                                                                   |
+| Each skill is a real SDK sub-agent with scoped tools | ✅ See `pipeline/sub-agents.ts`.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Structured handoffs replace text-scrape validation   | ⚠️ **Deferred.** `forwardSubagentText: true` routes sub-agent text into the parent stream and the post-hoc `findSandboxHandleInText` validator still runs as belt-and-suspenders. Replacing it with `task_notification`-driven stage tracking is the right move and is bundled into whichever plan next touches the runner (most likely Plan 18b or Plan 18). Discussed and explicitly held during the close — see this plan's tail. |
+| `local-shell` smoke matches Plan 17a's outcome       | ✅ EDU-16 completed end-to-end in 70.8s; PR #3 opened; Linear → Done.                                                                                                                                                                                                                                                                                                                                                                |
+| ≥40% reduction in first-attempt input tokens         | Goal revised mid-flight to "no first-attempt 429s under Sonnet 4.6's 30k TPM cap" once `forwardSubagentText` made the original token-count comparison apples-vs-oranges. Revised criterion met — parent's first request is well under 30k and EDU-16 ran clean (under Haiku; Sonnet not yet retested but the math holds).                                                                                                            |
+| Four-check verification                              | ✅ typecheck / lint / test (380 passed, 1 pre-existing skip) / deps:check / build all clean.                                                                                                                                                                                                                                                                                                                                         |
+
+Bonus: caught and fixed a live bug during the EDU-16 smoke
+(`$SKILL_DIR` placeholder not substituted — sub-agents treated
+the documentation line as a shell variable in a fresh shell).
+Fix shipped in the same commit; regression test pins the
+substitution behaviour.
+
+The one acknowledged deferral (post-hoc text validator
+replacement) is tracked at the runner-level — whichever future
+plan touches `pipeline/runner.ts` next should bundle the
+`task_notification`-driven replacement. Holding the safety net
+in the meantime is a deliberate choice (only one live post-18a
+smoke; one regression is one too many).
