@@ -523,7 +523,11 @@ describe('ClaudeAgent — basic flow', () => {
       /* drain */
     }
     expect(Object.keys(observedOptions?.mcpServers ?? {})).toContain('linear');
-    expect(observedOptions?.tools).toEqual([]);
+    // Plan 16 / ADR 0014 path A: the parent agent executes skill steps
+    // directly, so it needs Bash + Read/Write/Edit + Glob/Grep in
+    // addition to the Linear MCP tool.
+    expect(observedOptions?.tools).toEqual(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep']);
     expect(observedOptions?.allowedTools).toContain('mcp__linear__linear_graphql');
+    expect(observedOptions?.allowedTools).toContain('Bash');
   });
 });

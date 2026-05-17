@@ -40,7 +40,13 @@ export function buildPipelinePrompt(context: PipelinePromptContext): string {
   const sections: string[] = [
     buildHeader(issue),
     buildPipelineOverview(),
-    buildStage1SandboxSection(sandboxSkill, repoUrl, branchName, issue.identifier),
+    buildStage1SandboxSection(
+      sandboxSkill,
+      repoUrl,
+      context.defaultBranch,
+      branchName,
+      issue.identifier,
+    ),
     buildStage2CoderSection(coderSkill, issue),
     buildStage3CloseOutSection(issue),
     buildOutputInstructions(),
@@ -78,6 +84,7 @@ Each stage produces a structured JSON output that feeds into the next.`;
 function buildStage1SandboxSection(
   skill: SkillDefinition | undefined,
   repoUrl: string,
+  defaultBranch: string,
   branchName: string,
   identifier: string,
 ): string {
@@ -90,6 +97,7 @@ development environment.
 
 **Inputs for @sandbox:**
 - repo_url: ${repoUrl}
+- default_branch: ${defaultBranch}
 - branch: ${branchName}
 - identifier: ${identifier}
 

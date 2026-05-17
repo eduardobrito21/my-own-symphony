@@ -189,8 +189,22 @@ export class ClaudeAgent implements AgentRunner {
             model: this.model,
             systemPrompt: this.skillMarkdown,
             mcpServers: { linear: this.mcpServer },
-            tools: [],
-            allowedTools: ['mcp__linear__linear_graphql'],
+            // Plan 16 / ADR 0014, path A: the parent agent reads each
+            // SKILL.md and executes its steps directly via these tools.
+            // An empty `tools` array disables ALL built-ins regardless
+            // of `allowedTools` (see SDK sdk.d.ts:1216) — the prior
+            // setting silently forced the agent to hallucinate sandbox
+            // and coder outputs because it had no shell to run them in.
+            tools: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'],
+            allowedTools: [
+              'Bash',
+              'Read',
+              'Write',
+              'Edit',
+              'Glob',
+              'Grep',
+              'mcp__linear__linear_graphql',
+            ],
             cwd: input.workspacePath,
             abortController,
             ...(this.thinking !== undefined && { thinking: this.thinking }),
@@ -292,6 +306,21 @@ export class ClaudeAgent implements AgentRunner {
           yield this.failedEvent(
             `SDK iteration failed after buffered ${bufferedTerminal.kind}: ${stringifyCause(cause)}`,
           );
+          aborted = true;
+        } else if (input.signal?.aborted === true) {
+          // Orchestrator-initiated cancel (e.g. tracker observed the
+          // issue reached a terminal state mid-run, or the daemon is
+          // shutting down). The agent's own work landed successfully
+          // before the cancel — surfacing turn_failed here is
+          // misleading and trips alerting downstream.
+          log.info('claude_turn_canceled_by_orchestrator', {
+            yielded_any: yieldedAny,
+          });
+          yield {
+            kind: 'turn_completed',
+            at: this.now(),
+            turnNumber,
+          };
           aborted = true;
         } else {
           log.error('claude_turn_errored', {

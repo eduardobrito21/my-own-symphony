@@ -15,30 +15,51 @@ tested.
 You will receive:
 
 - `repo_url`: The Git repository URL to clone
-- `branch`: The branch to checkout (or create)
+- `default_branch`: The repo's default branch (e.g., "main") — used as
+  the base for new work branches
+- `branch`: The work branch to checkout (or create)
 - `identifier`: Issue identifier for naming (e.g., "ENG-123")
 
 ## Steps to Execute
 
-### Step 1: Create Worktree Directory
+### Step 1: Confirm the Worktree Directory
+
+The daemon already prepared a per-issue workspace and set it as your
+current working directory. Use that directory as the worktree — do not
+clone into `/tmp` or anywhere else.
 
 ```bash
-# Create a unique workspace directory
-SANDBOX_ID="symphony-${identifier}"
-WORKTREE_PATH="${WORKSPACE_ROOT}/${SANDBOX_ID}"
-mkdir -p "${WORKTREE_PATH}"
+# The daemon's per-issue workspace is your cwd. Capture absolute paths.
+WORKTREE_PATH="$(pwd)"
+SANDBOX_ID="symphony-${identifier}"   # substitute the issue identifier from Input
 ```
 
-### Step 2: Clone Repository
+### Step 2: Clone or Update Repository
+
+The worktree must always start from the **latest upstream state of the
+default branch**. On a fresh dispatch the directory is empty so we
+clone; on a re-dispatch the directory already has a checkout and we
+fast-forward the default branch before creating/switching to the work
+branch.
 
 ```bash
-# Clone if not already cloned, or fetch and checkout
-cd "${WORKTREE_PATH}"
+# Fresh dispatch: clone into the cwd
 if [ ! -d ".git" ]; then
   git clone "${repo_url}" .
 fi
+
+# Always sync with upstream
 git fetch origin
-git checkout "${branch}" 2>/dev/null || git checkout -b "${branch}" origin/main
+
+# Bring the default branch up to date with origin. --ff-only refuses
+# to rewrite local history — if the local default branch has diverged
+# (it shouldn't, the daemon owns this dir) the skill must fail loudly
+# rather than silently merging or discarding commits.
+git checkout "${default_branch}"
+git pull --ff-only origin "${default_branch}"
+
+# Switch to (or create) the work branch from the freshly-updated default
+git checkout "${branch}" 2>/dev/null || git checkout -b "${branch}" "${default_branch}"
 ```
 
 ### Step 3: Start Services (if applicable)
@@ -114,4 +135,8 @@ schema. Output it as the last thing you produce, wrapped in a code block:
   stages will substitute actual commands.
 - The `id` should be deterministic for the same (repo, identifier) pair
   to support idempotent re-dispatch.
-- Always use absolute paths for `worktree_path`.
+- Always use absolute paths for `worktree_path`. The current working
+  directory `$(pwd)` is already absolute — use it directly.
+- Do NOT clone into `/tmp/...`. The daemon's per-issue workspace (your
+  cwd) is the canonical worktree location and is cleaned up by the
+  workspace manager between runs.
