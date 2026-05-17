@@ -28,6 +28,9 @@ function makeInput(workspacePath: string, attempt: number | null = null): AgentR
     workspacePath,
     prompt: 'test prompt',
     labels: [],
+    title: 'test title',
+    description: null,
+    url: null,
     attempt,
   };
 }

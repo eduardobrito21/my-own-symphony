@@ -49,8 +49,13 @@ export interface PipelineAgentRunnerArgs {
 
 /**
  * The skills required by the pipeline.
+ *
+ * The MVP @ci is conditional at runtime (only invoked if @coder
+ * reported changes), but its SKILL.md must be available at prompt-
+ * build time so the agent has the instructions in context when it
+ * decides whether to run it.
  */
-const REQUIRED_SKILLS = ['sandbox', 'coder'] as const;
+const REQUIRED_SKILLS = ['sandbox', 'coder', 'ci'] as const;
 
 /**
  * PipelineAgentRunner orchestrates the sub-agent pipeline.
@@ -251,19 +256,20 @@ export class PipelineAgentRunner implements AgentRunner {
       return this.fetchIssue(input.issueId, projectKey);
     }
 
-    // Build a minimal issue from the available input.
-    // In production, the orchestrator has already fetched the full issue,
-    // but we don't have direct access to it here. The prompt contains
-    // the essential info; this is a fallback structure.
+    // Build the issue context from the AgentRunInput fields the
+    // orchestrator threads through. Title, description, url, and
+    // labels are populated from the actual issue; fields that don't
+    // affect prompt rendering (priority, state, blockers, timestamps)
+    // are left at sensible defaults — Plan 18's @coder may need more.
     return {
       id: input.issueId,
       identifier: input.issueIdentifier,
-      title: `Issue ${input.issueIdentifier}`, // Placeholder
-      description: null,
+      title: input.title,
+      description: input.description,
       priority: null,
-      state: 'Todo',
+      state: 'In Progress',
       branchName: null,
-      url: null,
+      url: input.url,
       labels: input.labels,
       blockedBy: [],
       createdAt: null,

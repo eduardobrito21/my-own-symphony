@@ -114,3 +114,35 @@ export function parseCoderResult(input: unknown): CoderResult {
 export function safeParseCoderResult(input: unknown): z.SafeParseReturnType<unknown, CoderResult> {
   return CoderResultSchema.safeParse(input);
 }
+
+// ---------------------------------------------------------------------------
+// CIResult — returned by @ci skill (MVP shipped alongside Plan 17a;
+// Plan 19 will replace with the full version).
+// ---------------------------------------------------------------------------
+
+/**
+ * The structured output `@ci` returns. The load-bearing fields are
+ * `pr_url` (what the daemon posts back to Linear) and `pr_number`
+ * (what future code may want for cross-referencing). Other fields are
+ * informational for the audit trail.
+ *
+ * `reused: true` means @ci found an existing PR for the branch and
+ * did not open a new one (re-dispatch idempotency).
+ */
+export const CIResultSchema = z.object({
+  pr_url: z.string().url(),
+  pr_number: z.number().int().positive(),
+  branch: z.string().min(1),
+  head_sha: z.string().min(1).optional(),
+  reused: z.boolean().optional(),
+});
+
+export type CIResult = z.infer<typeof CIResultSchema>;
+
+export function parseCIResult(input: unknown): CIResult {
+  return CIResultSchema.parse(input);
+}
+
+export function safeParseCIResult(input: unknown): z.SafeParseReturnType<unknown, CIResult> {
+  return CIResultSchema.safeParse(input);
+}

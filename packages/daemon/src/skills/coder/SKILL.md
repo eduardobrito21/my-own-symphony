@@ -1,62 +1,112 @@
-# @coder Skill — Make Code Changes (STUB)
+# @coder Skill — Make the Code Change (MVP)
 
-> **Note:** This is a STUB implementation for Plan 16. The real @coder
-> skill will be implemented in Plan 18.
+You are executing the `@coder` skill. Your job is to read the issue
+description and make the code change it asks for.
 
-You are executing the `@coder` skill. In the full implementation, you
-would make code changes to address the issue. For now, this is a stub
-that simply acknowledges the task.
+> **MVP scope.** This is a deliberately minimal coder shipped alongside
+> Plan 17a for the end-to-end smoke. It assumes the description is
+> small and concrete (single-file edits, README tweaks, one-line
+> changes). The full coder — with `@tester` sub-agent, multi-file
+> orchestration, scope handling — is Plan 18.
 
-## Your Task (Stub)
+## Inputs you receive
 
-1. Acknowledge the issue
-2. Return a CoderResult indicating no changes were made
+- `issue_identifier` — e.g. `EDU-13`.
+- `issue_title` — short summary.
+- `issue_description` — the body of the Linear issue. **This is your
+  instruction.** Follow it literally.
+- `sandbox_handle` — the JSON `@sandbox` returned. The fields you
+  need: `kind`, `worktree_path`, and `exec.template`.
 
-## Input
+## Where the files live
 
-You will receive:
+Look at `sandbox_handle.kind`:
 
-- `issue_title`: The title of the Linear issue
-- `issue_identifier`: The issue identifier (e.g., "ENG-123")
-- `sandbox_handle`: The SandboxHandle from the @sandbox skill
+- If `kind` starts with `local-` (e.g. `local-shell`,
+  `local-docker`), the worktree is **on this same host** at
+  `sandbox_handle.worktree_path`. Use the `Read`, `Edit`, `Write`,
+  `Glob`, `Grep` tools directly on absolute paths under that
+  worktree. Use `Bash` with the worktree as cwd for any shell work.
+- If `kind` is `namespace-devbox` (or any other remote backend),
+  the worktree lives **inside the sandbox** and you must route all
+  file operations through `sandbox_handle.exec.template`
+  (substitute `{cmd}` with your command). This MVP currently
+  prefers the `local-*` path; if you receive a remote handle and
+  can't complete the change confidently, fail with
+  `changed_files: []` and a clear `summary` explaining the gap.
 
-## Steps to Execute
+## Step 1 — Read the description
 
-### Step 1: Acknowledge the Issue
+`cat` (or `Read`) the issue description from the inputs above.
+Identify the **smallest concrete change** that satisfies it.
+Examples:
 
-```bash
-echo "Stub @coder acknowledging issue: ${issue_identifier} - ${issue_title}"
+- "Write XXXXXXX to the target repo README" → append (or overwrite)
+  the literal string `XXXXXXX` in `README.md` (or `README`,
+  whichever the repo uses).
+- "Bump dependency X to 1.2.3" → edit `package.json`.
+
+If the description is ambiguous or asks for something out of scope
+(e.g. requires running a build, touching many files, designing an
+API), **do not guess**. Return `changed_files: []` and a `summary`
+that explains why you couldn't complete it. The pipeline will skip
+the PR open and post your summary back to Linear.
+
+## Step 2 — Make the change
+
+Use `Read` to inspect the target file(s), then `Edit` (preferred for
+in-place changes) or `Write` (only if creating a new file or fully
+replacing the contents).
+
+Constraints (MVP):
+
+- **At most 3 files modified.** If the change requires more, treat
+  it as out-of-scope and return `changed_files: []`.
+- **No new dependencies.** Don't add npm packages, don't change
+  `package.json` `dependencies` (you may still edit version numbers
+  if that's the explicit request).
+- **Don't run the test suite, the build, or formatters.** Plan 18's
+  `@tester` covers that. For MVP we just make the edit; `@ci`
+  commits whatever you produced.
+
+If the file already contains what the issue is asking for (e.g.
+README already has the requested string), that is a **no-op
+success**: return `changed_files: []` with `summary: "no changes
+needed — target state already present"`. The pipeline will skip
+@ci.
+
+## Step 3 — Return the CoderResult
+
+Emit a single fenced ```json block as your **final output**, matching
+`CoderResult`:
+
+```json
+{
+  "changed_files": ["README.md"],
+  "summary": "One-sentence description of what you changed and why."
+}
 ```
 
-### Step 2: Return CoderResult
+`changed_files` is a list of **paths relative to the worktree root**.
+The parent agent and `@ci` consume this verbatim:
 
-Output a JSON object indicating no changes were made:
+- If `changed_files.length === 0` → @ci is skipped, pipeline posts
+  `summary` to Linear and closes out.
+- If `changed_files.length > 0` → @ci stages exactly those files,
+  commits with a message derived from `summary` + the issue
+  identifier, pushes, and opens a PR.
+
+## Error reporting
+
+If you hit a real failure (file write rejected, worktree not
+accessible, etc.), do not fabricate success. Return:
 
 ```json
 {
   "changed_files": [],
-  "summary": "Stub @coder: acknowledged issue '${issue_title}' but made no changes (Plan 16 stub)"
+  "summary": "ERROR: <one-line description of what went wrong>"
 }
 ```
 
-## Output Format
-
-Your final output MUST be a valid JSON object matching the CoderResult
-schema:
-
-```json
-{
-  "changed_files": [],
-  "summary": "..."
-}
-```
-
-## Future Implementation (Plan 18)
-
-The real @coder skill will:
-
-- Read the issue description and requirements
-- Use Bash/Read/Edit tools routed through the sandbox
-- Make actual code changes
-- Run tests via @tester sub-agent
-- Return the list of modified files
+The pipeline detects the `ERROR:` prefix and surfaces it in the
+Linear comment so the operator knows to look.

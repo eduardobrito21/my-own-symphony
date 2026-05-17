@@ -483,3 +483,151 @@ matches what `namespace-create.sh` actually prints. The new
 `exec.template` is `"nsc ssh <id> -T -- {cmd}"` (note `-T` for no
 PTY and `--` separator), which the existing zod schema
 (`shell-template` kind) accepts unchanged.
+
+### 2026-05-17 — MVP `@coder` + `@ci`; end-to-end smoke succeeded
+
+This was the "go for the magic moment" sprint. The stub `@coder`
+shipped in Plan 16 + the hardcoded close-out comment got replaced
+with real implementations end-to-end. Linear EDU-15 → PR #2 →
+Done in 62 seconds, exactly as the architecture promised.
+
+**MVP `@coder`** at `packages/daemon/src/skills/coder/SKILL.md`:
+agent-driven (no scripts — the work is by definition issue-
+specific). Reads the issue description verbatim and makes the
+smallest concrete change. Constraints: ≤3 files, no new
+dependencies, no test/build/format runs (Plan 18's `@tester`
+covers those). Emits `CoderResult` with `changed_files` and
+`summary`. **If `changed_files` is empty, the pipeline skips
+`@ci` and posts the summary to Linear — by design.** Handles
+remote sandboxes by failing loud (Plan 18 will route through
+`exec.template`).
+
+**MVP `@ci`** at `packages/daemon/src/skills/ci/`:
+
+```
+ci/
+├── SKILL.md
+└── scripts/
+    └── ci-commit-push-pr.sh
+```
+
+Same script-runner pattern as `@sandbox`. The script does:
+preflight checks (`git`, `gh`, `gh auth status`), branch hygiene,
+stage with `git add -A`, commit with a `[<id>] <title>` subject +
+coder summary body, `git push --force-with-lease`,
+`gh pr list --head` for the open-or-reuse check, and
+`gh pr create` otherwise. Emits `CIResult` JSON
+(`pr_url`, `pr_number`, `branch`, `head_sha`, `reused`).
+Skill markdown bails fast if `sandbox_handle.kind` is not
+`local-*` — the MVP `@ci` runs on the daemon host (where `gh`
+lives), not inside a remote VM. Plan 19 generalizes.
+
+**New `CIResultSchema`** at
+`packages/daemon/src/agent/skills/schemas.ts`. zod-validated like
+the other skill outputs. Not actively scanned by the runner yet
+(post-hoc validation today only covers `SandboxHandle`); Plan 18
+should validate `CoderResult` and `CIResult` at the same boundary.
+
+**Pipeline becomes 4 stages**: `@sandbox → @coder → @ci? →
+close-out`. Stage 3 is conditional on `@coder` producing changes.
+Stage 4 composes a Linear comment based on outcome:
+
+- `@ci` opened a PR → `Symphony opened PR: <url>` + completion
+  marker.
+- `@coder` skipped → `Symphony made no changes: <summary>` + marker.
+- Any stage failed → `Symphony pipeline failed at <stage>:
+<reason>` + marker.
+
+All paths transition the issue to `Done` so the orchestrator
+doesn't re-dispatch.
+
+**GIT_ASKPASS brought forward from Plan 17b.** First end-to-end
+probe revealed: the daemon host had no git credential helper
+configured, so `git push` over HTTPS would have failed even
+with `GITHUB_TOKEN` in env. Implemented Plan 17b's "local
+branch" design inline in `ci-commit-push-pr.sh` — ~10 lines:
+a `mktemp`-backed askpass helper script written + chmod'd at
+runtime, `GIT_ASKPASS=<helper>` + `GIT_TERMINAL_PROMPT=0`
+exported, `trap` cleanup. Token never enters argv,
+`.git/config`, or any persisted state. Plan 17b is now
+half-shipped; the namespace-side counterpart still pending.
+
+**Bug — `title` / `description` / `url` not threaded through.**
+Plan 17a's earlier work added `labels` to `AgentRunInput` but
+forgot the rest. The runner's `getIssueContext` fallback was
+emitting a placeholder `Issue` with `title: "Issue EDU-NN"` and
+`description: null`. First live smoke caught it: the agent saw
+`Description: (no description)` despite the Linear issue having
+a real body. Fix was the same shape as labels — extend
+`AgentRunInput` with `title`, `description`, `url`; orchestrator
+passes them through; runner uses them in the fallback. Mock /
+Claude agent test fixtures updated.
+
+**Bug — validator false-failure when agent narrates instead of
+echoing.** `findSandboxHandleInText` scans the agent's accumulated
+assistant text for fenced ```json blocks matching the
+SandboxHandle schema. Claude's natural style on the first smoke
+was to narrate validation in prose ("✅ Stage 1 complete,
+SandboxHandle validated…") without ever emitting the JSON block.
+The script's stdout (which IS the JSON) lives in the Bash
+`tool_result`event, not assistant text — so the validator
+correctly saw "no SandboxHandle here" even though everything
+worked. Two-pronged fix: (a) strengthened`@sandbox`SKILL.md to
+make echoing the JSON a hard requirement before continuing to
+Stage 2; (b) added a "REQUIRED before continuing to Stage 2"
+reminder directly in the pipeline prompt's Stage 1 section.
+Plan 18 should fix this properly by having the runner extract
+the JSON from the Bash`tool_result` event directly — eliminates
+the agent-discipline dependency entirely.
+
+**Rate-limit observation (real, expensive).** Sonnet 4.6's
+30,000 input-tokens-per-minute org cap rejects our 75,423-token
+single request. First attempt 429'd after the cache write
+completed → $0.30 sunk cost. Daemon's retry policy kicks in
+(60s delay); cache stays warm; subsequent attempts succeed
+because the TPM window has cleared. Net cost across iterations:
+a few dollars. Real concern for production though — the 75k
+prompt is mostly tool schemas + three inlined SKILL.md bodies.
+Plan 18 or a separate plan should trim aggressively (move
+SKILL.md inlining to "read on demand", strip the SDK's default
+tool surface to just what's needed). Not a blocker for the
+demo; flagged.
+
+**Smoke trace (EDU-15, 2026-05-17 14:53:07 → 14:54:09):**
+
+```
+14:53:07  dispatch EDU-15 (description="write 'potato2' to the readme")
+14:53:18  Stage 1: local-create.sh executed
+14:53:27  SandboxHandle JSON emitted in fenced block (validator OK)
+14:53:34  Stage 2: Edit appended "potato2" to README.md
+14:53:39  CoderResult: changed_files=["README.md"]
+14:53:43  Stage 3: ci-commit-push-pr.sh executed
+14:53:46  Branch symphony/EDU-15 pushed, PR #2 opened
+14:53:50  CIResult: pr_url=…/pull/2
+14:53:55  Stage 4: Linear comment posted (with PR URL)
+14:54:04  Linear issue transitioned to Done
+14:54:09  pipeline_run_ended outcome="turn_completed"
+```
+
+**Artifacts left behind for the trophy case:**
+
+- PR: https://github.com/eduardobrito21/my-own-symphony-test/pull/2
+- Branch: `symphony/EDU-15` (head sha `a64188b`)
+- Linear EDU-15: state=Done, completion-marker comment present.
+
+**Status update.** Plan 17a is functionally complete. Remaining
+items (in priority order, for whoever picks them up):
+
+1. Plan 17b's namespace-side credential injection (the local-side
+   shipped here).
+2. Plan 18 — real `@coder` with `@tester` sub-agent + proper
+   `CoderResult`/`CIResult` boundary validation via the Bash
+   `tool_result` path.
+3. Plan 19 — `@ci` generalization to route through
+   `sandbox_handle.exec.template` so remote backends work.
+4. Prompt size pruning — the 75k token prompt is a real production
+   concern. Separate plan.
+5. Manual end-to-end smoke against the **Namespace** backend
+   (today's smoke only exercised `local-shell`). The `nsc` CLI
+   surface is proven via the standalone 2026-05-17 probe but
+   never run through the daemon's full pipeline.

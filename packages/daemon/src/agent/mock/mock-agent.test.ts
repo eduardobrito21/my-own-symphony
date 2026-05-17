@@ -12,6 +12,9 @@ function input(overrides: Partial<AgentRunInput> = {}): AgentRunInput {
     workspacePath: '/tmp/ws',
     prompt: 'do the thing',
     labels: [],
+    title: 'do the thing',
+    description: null,
+    url: null,
     attempt: null,
     ...overrides,
   };

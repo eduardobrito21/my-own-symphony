@@ -40,6 +40,7 @@ function defaultSkills(): Map<string, SkillDefinition> {
   return new Map<string, SkillDefinition>([
     ['sandbox', skill('sandbox', '# sandbox skill body')],
     ['coder', skill('coder', '# coder skill body')],
+    ['ci', skill('ci', '# ci skill body')],
   ]);
 }
 
@@ -103,5 +104,87 @@ describe('buildPipelinePrompt — label surfacing (Plan 17a)', () => {
     const stage2Heading = prompt.indexOf('## Stage 2: @coder');
     const stage1 = prompt.slice(stage1Heading, stage2Heading);
     expect(stage1).toMatch(/- labels: \(none\)/);
+  });
+});
+
+describe('buildPipelinePrompt — MVP @coder + @ci pipeline shape', () => {
+  // The MVP @coder + @ci shipped alongside Plan 17a give us a 4-stage
+  // pipeline (@sandbox → @coder → @ci? → close-out). These tests pin
+  // that shape so Plan 18 / 19 don't accidentally drop stages.
+
+  it('emits four stages in order: sandbox, coder, ci, close-out', () => {
+    const prompt = buildPipelinePrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      skills: defaultSkills(),
+    });
+
+    const order = [
+      '## Stage 1: @sandbox',
+      '## Stage 2: @coder',
+      '## Stage 3: @ci',
+      '## Stage 4: Close Out',
+    ];
+    let cursor = -1;
+    for (const heading of order) {
+      const next = prompt.indexOf(heading, cursor + 1);
+      expect(
+        next,
+        `expected to find "${heading}" after position ${String(cursor)}`,
+      ).toBeGreaterThan(cursor);
+      cursor = next;
+    }
+  });
+
+  it('tells the agent to skip Stage 3 when @coder returned no changed files', () => {
+    const prompt = buildPipelinePrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      skills: defaultSkills(),
+    });
+
+    // The Stage 3 section must clearly instruct "skip if empty"; the
+    // Stage 2 section must point at the skip path too so the agent
+    // doesn't fall through silently.
+    expect(prompt).toMatch(/skip[^\n]*Stage 3/i);
+    expect(prompt).toMatch(/empty[^\n]*changed_files|changed_files[^\n]*empty/i);
+  });
+
+  it('renders the issue URL in the header so Stage 4 can use it in the PR comment', () => {
+    const prompt = buildPipelinePrompt({
+      issue: makeIssue({ url: 'https://linear.app/example/issue/EDU-77' }),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      skills: defaultSkills(),
+    });
+
+    expect(prompt).toContain('- URL: https://linear.app/example/issue/EDU-77');
+  });
+
+  it('injects $SKILL_DIR for both @sandbox and @ci sections', () => {
+    const prompt = buildPipelinePrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      skills: defaultSkills(),
+    });
+
+    // Both skills ship scripts under scripts/; the prompt must give
+    // the agent the directory for each so it doesn't have to guess.
+    const sandboxHeading = prompt.indexOf('## Stage 1: @sandbox');
+    const ciHeading = prompt.indexOf('## Stage 3: @ci');
+    expect(sandboxHeading).toBeGreaterThan(0);
+    expect(ciHeading).toBeGreaterThan(sandboxHeading);
+
+    const sandboxSection = prompt.slice(sandboxHeading, prompt.indexOf('## Stage 2:'));
+    const ciSection = prompt.slice(ciHeading, prompt.indexOf('## Stage 4:'));
+    expect(sandboxSection).toMatch(/SKILL_DIR=\/fake\/sandbox/);
+    expect(ciSection).toMatch(/SKILL_DIR=\/fake\/ci/);
   });
 });

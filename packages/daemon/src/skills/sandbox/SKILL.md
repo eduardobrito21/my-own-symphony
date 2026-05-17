@@ -68,22 +68,27 @@ The script will:
 If the script exits non-zero, the dispatch has failed. Report the
 last `[<backend>-create] ERROR: ...` line from stderr and stop.
 
-## Step 2 — Emit the SandboxHandle
+## Step 2 — Emit the SandboxHandle (REQUIRED, do not skip)
 
-The script's stdout is already a well-formed `SandboxHandle`. Echo
-it back wrapped in a fenced ```json block as your final output:
+**This step is mandatory.** The Symphony daemon validates the
+SandboxHandle by scanning your assistant text for a fenced JSON
+code block (three backticks + the word `json`) that matches the
+schema. If you only narrate the handle in prose ("Stage 1 complete,
+handle is valid…") the daemon classifies the run as failed even
+when everything else succeeded.
 
-````
-```json
-{ ... the JSON the script printed ... }
-```
-````
+Before continuing to Stage 2, send an assistant message containing:
 
-The parent agent extracts the **last** ```json block from your
-output, so this should be the last thing you print.
+- Three backticks followed by `json`,
+- The JSON the create script printed to stdout in Step 1 (verbatim,
+  do not reformat or modify it),
+- Three closing backticks.
 
-Do not modify or reformat the JSON. The script is the authority on
-backend-specific fields (`kind`, `exec.template`, `teardown`).
+Then continue to Stage 2.
+
+The script is the authority on backend-specific fields (`kind`,
+`exec.template`, `teardown`). Your only job here is to surface its
+output in a form the daemon's validator can find.
 
 ## Branch reference (informational)
 

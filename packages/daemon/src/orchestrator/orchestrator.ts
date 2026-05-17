@@ -388,6 +388,9 @@ export class Orchestrator {
           workspacePath: workspace.path,
           prompt: renderResult.value,
           labels: issue.labels,
+          title: issue.title,
+          description: issue.description,
+          url: issue.url,
           attempt: null,
           signal,
         });
