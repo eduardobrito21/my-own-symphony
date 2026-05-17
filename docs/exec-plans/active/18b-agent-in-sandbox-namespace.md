@@ -11,11 +11,11 @@
 - **Comes AFTER:** Plan 17a (multi-backend `@sandbox` dispatcher),
   Plan 18a (SDK native sub-agents — the in-daemon pattern this
   plan extends, not replaces), Plan 20 first cut (`@planner`).
-  Plan 17b (private repo creds) is _adjacent_: this plan adds a
-  second secret (`ANTHROPIC_API_KEY`) that uses the same
-  injection pattern Plan 17b establishes for `GITHUB_TOKEN`. If
-  17b hasn't shipped, this plan ships the pattern; 17b later
-  adopts it.
+  Plan 17b (private repo creds) is _subsumed for the namespace
+  backend_: this plan threads `GITHUB_TOKEN` through the
+  workspace vault rather than as an env var inherited from the
+  daemon. 17b's host-side credential pattern stays relevant
+  only for `local-*` dispatches.
 - **Comes BEFORE:** Plan 18 (real `@coder` + `@tester`) — bigger
   iteration loops are dangerous without sandbox isolation. The
   decision to deprecate `local-*` backends (informally agreed
@@ -24,27 +24,27 @@
   context.
 - **Layers touched:**
   - `packages/daemon/src/skills/sandbox/scripts/namespace-create.sh`
-    (install `claude` CLI in the VM during provisioning; pin a
-    version range; verify after install; `nsc instance upload` the daemon's
-    skills directory + the in-VM wrapper into `/opt/symphony/`
-    per Decision 12)
+    (full rewrite — POST to `ComputeService/CreateInstance` with
+    container + `envVars[].fromSecretId`, clone repo inside the
+    agent container, upload skills + wrapper into
+    `/opt/symphony/` per Decision 12)
+  - `docker/symphony-agent.Dockerfile` (new — operator-built
+    image carrying `claude` + `git` + `gh`; see Decision 13)
   - `packages/daemon/src/skills/sandbox/scripts/in-vm/dispatch.sh`
     (new file — the in-VM wrapper script the parent agent
     invokes via `nsc ssh`; reads SKILL.md from the bundle,
-    invokes `claude -p`, streams NDJSON back. See Decision 12.)
+    invokes `claude -p` in default text mode, emits the
+    agent's final assistant reply on stdout. See Decision 12.)
   - `packages/daemon/src/agent/pipeline/parent-prompt.ts`
     (kind-aware dispatch instructions in the orchestration
     prompt: after `@sandbox` returns, branch on `kind` for the
     remaining stages)
-  - `packages/daemon/src/agent/pipeline/runner.ts` (event mapping
-    for `claude --print --output-format=stream-json` stdout
-    coming back from `nsc ssh`)
-  - `packages/daemon/src/agent/claude/event-mapping.ts` (extend
-    the existing SDKMessage → AgentEvent table to also cover
-    `claude` CLI NDJSON events; same shape, different transport)
-  - `SECURITY.md` (document `ANTHROPIC_API_KEY` reaching the
-    sandbox; tighten the trust posture section for remote-VM
-    secret handling)
+  - `packages/daemon/src/agent/pipeline/parent-prompt.test.ts`
+    (new tests pinning the kind-aware routing language for
+    stages 2-4; prompt-length ceiling bumped 6.5k → 8.5k)
+  - `SECURITY.md` (document the vault flow for namespace
+    backends: secrets reach the agent container via
+    `envVars[].fromSecretId`, never touch disk)
   - `symphony.yaml` example (operator note: namespace backend
     now needs `ANTHROPIC_API_KEY` in `.env` to be forwarded)
 - **ADRs referenced:** ADR 0015 (this plan's decision document),
@@ -62,22 +62,27 @@ they're operating on. After this plan ships:
 
 - A Linear issue with the `namespace` (or `sandbox:namespace`)
   label dispatches through the full pipeline.
-- The microVM is provisioned with `claude` CLI pre-installed (by
-  `@sandbox`'s namespace-create script).
+- `namespace-create.sh` calls the Namespace API directly,
+  spinning up an instance + one `agent` container from the
+  operator's pre-built `symphony-agent` image (carries `claude`
+  CLI + `git` + `gh`).
 - The parent agent (still in the daemon) invokes `@planner`,
   `@coder`, `@ci` by shelling out to the in-VM wrapper:
-  `nsc ssh <id> -T -- /opt/symphony/dispatch.sh <name> '<inputs-json>'`.
+  `nsc ssh <id> --container_name agent -T -- /opt/symphony/dispatch.sh <name> '<inputs-json>'`.
   Credentials (`ANTHROPIC_API_KEY`, `GITHUB_TOKEN`) reach the
-  sandbox via an uploaded env file the wrapper sources
-  (Decision 4) — `nsc ssh` does not support env-var flags.
+  agent container via Namespace vault `envVars[].fromSecretId`
+  injection at container start (Decision 4) — no env file, no
+  on-disk secret window.
 - Sub-agent file edits stay inside the microVM. The daemon's
   host filesystem is structurally unreachable to those sub-
   agents — the EDU-18 class of "agent writes to source repo"
   bug becomes impossible by construction, not by SKILL.md
   discipline.
 - `@ci`'s `git push` and `gh pr create` run from inside the
-  microVM, using `GITHUB_TOKEN` injected the same way (extending
-  Plan 17b's pattern).
+  agent container, using the vault-injected `GITHUB_TOKEN`.
+  This subsumes Plan 17b's host-side credential threading for
+  the namespace backend (17b stays relevant only for `local-*`
+  backends).
 
 `local-*` dispatches keep Plan 18a's in-daemon behavior
 verbatim. No behavior change for local; namespace becomes
@@ -154,11 +159,18 @@ follow-up optimization once the architecture lands.
   fresh microVM per dispatch — no cross-dispatch session
   persistence, no warm pool. Reuse is a cost optimization for
   a follow-up plan once we have real dispatch volume.
-- **Custom `claude` CLI flags / extensions.** We use the standard
-  `claude -p --output-format=stream-json` flow. If we need
-  features the CLI doesn't expose, we negotiate with Anthropic
-  rather than fork. (Cost: CLI compatibility is a foreign API;
-  we accept that risk explicitly — see Decision 7.)
+- **Custom `claude` CLI flags / extensions.** We use the
+  standard `claude -p` flow in default text output mode. If we
+  ever need features the CLI doesn't expose, we negotiate with
+  Anthropic rather than fork. (Cost: CLI compatibility is a
+  foreign API; we accept that risk explicitly — see Decision 7.)
+- **Streaming intermediate events from sub-agents to the daemon
+  (NDJSON via `--output-format=stream-json`).** Wrapper uses
+  default text mode in v1 — the daemon sees only the
+  sub-agent's final assistant reply (which contains the
+  structured JSON fence). Richer dashboard observability for
+  remote dispatches lands when we have a real reason to invest
+  in NDJSON parsing in the daemon.
 - **Anthropic-managed agents.** ADR 0015 option 6. Different
   product decision; not addressed here.
 - **Operator UI for remote dispatches.** The dashboard's event
@@ -212,11 +224,13 @@ After `@sandbox` returns, the parent inspects
       nsc ssh "$sandbox_id" -T -- \
           /opt/symphony/dispatch.sh <subagent-name> '<inputs-json>'
 
-  The wrapper sources `/opt/symphony/env` (uploaded at
-  `@sandbox` time — Decision 4) to get `ANTHROPIC_API_KEY` and
-  `GITHUB_TOKEN` into its environment, then invokes
-  `claude -p --output-format=stream-json …`. The parent observes
-  the sub-agent via the ssh stdout stream.
+  Credentials reach the wrapper's process via the container's
+  vault-injected env vars (Decision 4) — `ANTHROPIC_API_KEY`
+  and `GITHUB_TOKEN` are already in `env` when `dispatch.sh`
+  starts. The wrapper invokes `claude -p` in default text mode;
+  its stdout is the sub-agent's final assistant reply (which
+  contains the structured JSON fence). The parent reads that
+  reply via its `Bash` tool.
 
 The routing logic lives in the **parent prompt** — i.e., the
 parent agent itself decides which dispatch mode to use based on
@@ -225,118 +239,128 @@ builder includes both modes' instructions; the parent picks
 based on observation. This avoids a special "remote-mode
 parent" build path and keeps the parent in charge of orchestration.
 
-### Decision 3 — `@sandbox`'s `namespace-create.sh` installs `claude` CLI AND copies the daemon's Symphony bundle into the VM
+### Decision 3 — `namespace-create.sh` calls the Namespace API directly to provision instance + agent container
 
-Today's `namespace-create.sh` creates a bare microVM and clones
-the repo. Plan 18b extends it to do three things after the clone:
+The `nsc create` CLI doesn't expose `containers[].envVars[].fromSecretId`,
+which is the only mechanism for getting vault secrets into a
+container's env without writing them to disk. So Plan 18b
+replaces the `nsc create --bare` call with a direct
+`POST /namespace.cloud.compute.v1beta.ComputeService/CreateInstance`
+to the Namespace API. The bearer token comes from
+`nsc auth generate-dev-token --output_to <tmpfile>` per dispatch
+(no keychain hunting, no long-lived tokens).
 
-1.  **Install the `claude` CLI** inside the microVM (one-time
-    `curl ... | sh`, version-range checked):
+The request declares one container — `agent` — referencing the
+operator's pre-built image and pulling both creds from the vault:
 
-        nsc ssh "$id" -T -- bash -c '
-          set -euo pipefail
-          curl -fsSL https://claude.ai/install.sh | bash
-          claude --version | grep -E "^claude (1\.|2\.)" \
-            || { echo "[namespace-create] ERROR: unsupported claude CLI" >&2; exit 1; }
-        '
-
-2.  **Copy the daemon's current `packages/daemon/src/skills/`
-    directory** into the VM at `/opt/symphony/skills/`. The
-    skills the agent operates by are whichever ones the
-    _running daemon_ shipped with — NOT whichever ones the
-    target repo happens to contain. This separation is
-    load-bearing for dogfood mode (target repo IS Symphony):
-    the daemon's running contract is what governs the dispatch;
-    the worktree's in-flight edits to skills are the artifact
-    being produced, not the artifact running.
-
-    `nsc instance upload` only handles single files (no `-r`
-    flag exists). To upload the skills tree atomically we tar
-    it on the daemon, upload the archive, and extract in the
-    VM:
-
-        SKILLS_TAR=$(mktemp -t symphony-skills.XXXXXX.tar.gz)
-        tar -czf "$SKILLS_TAR" -C <daemon-side parent of skills/> skills
-        nsc instance upload "$id" "$SKILLS_TAR" \
-            /opt/symphony/skills.tar.gz --mkdir
-        rm -f "$SKILLS_TAR"
-        nsc ssh "$id" -T -- bash -c '
-          set -e
-          tar -xzf /opt/symphony/skills.tar.gz -C /opt/symphony/
-          rm -f /opt/symphony/skills.tar.gz
-        '
-
-3.  **Copy the in-VM wrapper script** (new file added by this
-    plan; see Decision 12) to `/opt/symphony/dispatch.sh` and
-    make it executable. Single-file upload, no archive needed:
-
-        nsc instance upload "$id" <daemon-side wrapper path> \
-            /opt/symphony/dispatch.sh --mkdir
-        nsc ssh "$id" -T -- chmod +x /opt/symphony/dispatch.sh
-
-Cost: ~30s for `claude` install + a few hundred ms for the two
-`nsc instance upload` operations. One-time per dispatch. Acceptable given
-the dispatch already takes 60-90s end-to-end and infra cost
-isn't the binding constraint.
-
-The version range guard on `claude` catches "Anthropic shipped a
-breaking CLI change and we missed the news" before the dispatch
-produces a broken handle. Range is widened over time as releases
-prove compatible; tightened on a known break.
-
-### Decision 4 — Credentials reach the sandbox via an uploaded env file
-
-`nsc ssh` does NOT support a `-e KEY=VAL` env-injection flag
-(verified against `nsc ssh --help` at plan-write time — only
-`-T`, `--container_name`, `--ssh_agent`, `--unique_tag`). The
-options narrow to two practical paths:
-
-1. **Pass env on the command line** — `nsc ssh <id> -T -- env
-ANTHROPIC_API_KEY=… claude -p …`. Argv-visible: `ps` inside
-   the VM, daemon logs of the shell command, anywhere the
-   command is echoed. Bad for secrets.
-2. **Upload an env file to the VM** — at `@sandbox` provisioning
-   time, write secrets to a temp file on the daemon, then
-   `nsc instance upload <id> <tmp> /opt/symphony/env`, then
-   `chmod 600` and remove the daemon-side temp. The wrapper
-   sources `/opt/symphony/env` before invoking `claude`. The
-   secrets live on the VM's filesystem only for the dispatch
-   lifetime; the VM is ephemeral (destroyed by teardown).
-
-We pick option 2. The argv-leak risk on option 1 is real and
-unavoidable without rewriting the shell layer; the VM-lifetime-
-bounded file leak on option 2 is manageable given microVMs are
-single-dispatch and destroyed at teardown.
-
-Concretely, `namespace-create.sh` does, after the VM is up:
+    POST $NAMESPACE_API_URL/namespace.cloud.compute.v1beta.ComputeService/CreateInstance
+    Authorization: Bearer <generated dev token>
+    Content-Type: application/json
 
     {
-      umask 077
-      cat > "$ENV_TMP" <<EOF
-    ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
-    GITHUB_TOKEN=$GITHUB_TOKEN
-    EOF
+      "duration": "30m",
+      "bare": true,
+      "uniqueTag": "symphony-<issue-identifier>",
+      "containers": [{
+        "name": "agent",
+        "imageRef": "nscr.io/<workspace>/symphony-agent:latest",
+        "envVars": [
+          {"name": "ANTHROPIC_API_KEY", "fromSecretId": "sec_..."},
+          {"name": "GITHUB_TOKEN",      "fromSecretId": "sec_..."}
+        ]
+      }]
     }
-    nsc instance upload "$id" "$ENV_TMP" /opt/symphony/env --mkdir
-    rm -f "$ENV_TMP"
-    nsc ssh "$id" -T -- chmod 600 /opt/symphony/env
 
-The wrapper at `/opt/symphony/dispatch.sh` starts with:
+**Critical wire-format detail caught during the smoke probe**:
+the field name is `imageRef` (camelCase, with the `Ref` suffix),
+NOT `image`. The API silently drops `image` and the container
+starts with no declared image → containerd then reports "invalid
+reference format" downstream with no clue why. Costed an hour
+during the probe; pinned by this decision.
 
-    set -a
-    . /opt/symphony/env
-    set +a
+After the API returns the `instanceId`, `namespace-create.sh`:
 
-So `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` are in the env
-the `claude` CLI inherits, without being on its argv.
+1. Polls `nsc ssh <id> --container_name agent -T -- /bin/true`
+   until reachable (image pull + container start; bounded at
+   120s).
+2. Clones the target repo INSIDE the agent container at
+   `/workspace` via `nsc ssh --container_name agent`. The
+   `GITHUB_TOKEN` is already in the container's env from vault
+   injection — clone authentication works without us threading
+   the token ourselves.
+3. Tars the daemon's `packages/daemon/src/skills/` and uploads
+   to `/opt/symphony/skills.tar.gz`, then extracts. `nsc
+instance upload --container_name agent` targets the
+   container's filesystem (not the host's).
+4. Uploads the in-VM wrapper to `/opt/symphony/dispatch.sh` and
+   `chmod +x` it.
 
-Hygiene: the daemon must NOT write the env values to any
-persistent log (the daemon's standard log scrubbing applies);
-the temp file on the daemon is `mktemp`-created with `umask
-077` and `rm`'d immediately after the upload returns.
+No `claude` CLI install at provision time — it's baked into the
+image (Decision 13). No env file write or upload — vault env
+vars reach the container directly (Decision 4). Per-dispatch
+provisioning time roughly matches the Plan 17a baseline
+(60–90s end-to-end) with no on-disk-secret window.
 
-If Plan 17b ships before Plan 18b, it adopts this same pattern
-for `GITHUB_TOKEN`. If 18b ships first, 17b inherits.
+The skills + wrapper still upload per dispatch (not baked into
+the image) so SKILL.md edits ship with the daemon rather than
+needing an image rebuild — same rationale as Decision 12.
+
+Why API-direct over the `nsc create` CLI: the CLI lacks
+`containers[].envVars[].fromSecretId`, which is the only
+vault-native injection path. An uploaded env file is the
+fallback, but it puts secrets on the VM's filesystem (even if
+only for the VM lifetime). API-direct is one curl per dispatch
+(small operational cost) and eliminates the on-disk-secret
+window entirely.
+
+### Decision 4 — Credentials reach the agent container via vault `envVars[].fromSecretId`
+
+Namespace's vault → container plumbing injects env vars into a
+container's process at start time when the `CreateInstance`
+ContainerRequest declares `envVars[].fromSecretId` referencing a
+`sec_...` object id from the workspace vault. Confirmed working
+during the Plan 18b smoke (2026-05-17):
+
+- `nscr.io/<workspace>/symphony-agent:latest` pulled clean
+- `nsc ssh <id> --container_name agent -- env` shows
+  `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` populated by the
+  platform
+- `claude --version` runs inside the container
+- No filesystem writes, no argv exposure, no daemon-side log
+  exposure
+
+Operator stores both secrets in the Namespace vault UI:
+
+| Container env var   | Source                       |
+| ------------------- | ---------------------------- |
+| `ANTHROPIC_API_KEY` | Namespace vault `sec_...` ID |
+| `GITHUB_TOKEN`      | Namespace vault `sec_...` ID |
+
+The vault secret ids are operator-specific and hardcoded as
+constants at the top of `namespace-create.sh`
+(`NAMESPACE_SECRET_ANTHROPIC_API_KEY`,
+`NAMESPACE_SECRET_GITHUB_TOKEN`). For v1 dogfood (one operator)
+this is fine. A follow-up plan can lift them to
+`symphony.yaml` config when there's a second operator.
+
+Critical wire-format quirks discovered during the smoke (worth
+pinning here so the next traveler doesn't re-discover them):
+
+- The field is **`imageRef`** not `image`. `image` is silently
+  dropped; container then fails with "invalid reference format".
+- Field naming is **camelCase** (`envVars`, `fromSecretId`,
+  `uniqueTag`), even though the proto definitions use
+  snake_case internally — Connect-RPC's JSON binding flips
+  them.
+- The container's working dir is `/workspace` (the
+  Dockerfile's `WORKDIR`). The repo gets cloned there by
+  `namespace-create.sh`'s `nsc ssh --container_name agent`
+  step.
+
+Subsumes Plan 17b's `GITHUB_TOKEN` story for namespace
+backends. 17b's host-side credential threading remains relevant
+only for `local-*` backends (which keep the daemon-env-var
+pattern).
 
 ### Decision 5 — Sub-agent SKILL.md is invocation-mode-agnostic
 
@@ -359,22 +383,35 @@ The allowlist string per sub-agent comes from the same map
 `sub-agents.ts` already maintains for `AgentDefinition.tools`.
 No duplication.
 
-### Decision 6 — Event mapping reuses Plan 18a's table with NDJSON wrapping
+### Decision 6 — Wrapper output is plain text; daemon's existing post-hoc validators apply
 
-`claude --output-format=stream-json` emits one JSON object per
-line on stdout. The shape is the SDK's `SDKMessage` shape
-(Anthropic uses the same internal types in the CLI's streaming
-output). Plan 18a's `event-mapping.ts::mapSdkMessage` already
-handles `SDKMessage` → `AgentEvent`. We add a thin wrapper that
-reads stdout line-by-line from the `nsc ssh` Bash result, parses
-each line as JSON, and feeds it to `mapSdkMessage`. Same output
-type, same downstream behavior.
+The in-VM wrapper invokes `claude -p` in default text output
+mode. Its stdout is the sub-agent's final assistant reply —
+the same shape the local-kind sub-agents produce. That reply
+contains the structured JSON fence the daemon's post-hoc
+validators (`findSandboxHandleInText`,
+`safeParseCoderResult`, etc.) already scrape for. No new
+daemon-side parser is needed.
 
-Unknown event types: dropped (forward-compatible — `claude` may
-add events we haven't seen yet; let them through without
-mapping). Malformed lines: logged at warn level, dropped, do
-not fail the dispatch. EOF without a `result` message: classify
-as `turn_failed reason="claude CLI exited without result"`.
+Why not `--output-format=stream-json`:
+
+- The parent agent reads the wrapper's stdout via its `Bash`
+  tool. Text mode hands the parent the agent's natural reply
+  directly; the LLM trivially extracts the JSON fence.
+- Streaming intermediate events (tool calls, thinking blocks)
+  back to the daemon would be a richer dashboard story for
+  remote dispatches. It's a real follow-up, not a v1 need —
+  documented in Out of scope.
+- Avoiding NDJSON parsing in the daemon keeps the code path
+  for namespace dispatches surprisingly small. No new
+  `dispatchSubAgent` helper, no buffer-boundary handling, no
+  parser tests. The whole remote path is one prompt-level
+  instruction + one Bash invocation.
+
+Sub-agent failure handling: the wrapper's exit code mirrors
+`claude`'s. Non-zero propagates through `nsc ssh` to the
+parent's Bash tool; the parent's prompt instructs it to treat
+non-zero as a stage failure and skip downstream stages.
 
 ### Decision 7 — `claude` CLI version is a pinned dependency
 
@@ -476,8 +513,10 @@ and is `nsc instance upload`'d into the sandbox by `namespace-create.sh` at
 provision time. Its contract:
 
     /opt/symphony/dispatch.sh <subagent-name> <inputs-json>
-    # exits 0 on success, !=0 on error
-    # stdout: claude's --output-format=stream-json NDJSON, line-buffered
+    # exits 0 on success (claude finished), !=0 on claude failure
+    # stdout: the agent's final assistant reply (default text mode);
+    #         contains the structured JSON fence the daemon's
+    #         post-hoc validators scrape for.
 
 The wrapper:
 
@@ -486,15 +525,15 @@ The wrapper:
    length limit).
 2. Renders the per-sub-agent input block from the JSON
    argument into a small prompt header.
-3. Invokes `claude -p "<prompt>" --append-system-prompt "$(cat
+3. Invokes `claude --print --append-system-prompt "$(cat
 SKILL.md)" --allowed-tools "<per-subagent allowlist>"
---output-format=stream-json`.
-4. Streams stdout unchanged to its caller (the parent agent
-   reading via `nsc ssh -T`).
-5. Maps `claude` CLI's exit code to a final stdout line so the
-   daemon can disambiguate "ssh failed" from "claude exited
-   with error" (resolves the open question that Plan 17a left
-   for `nsc ssh` exit-code propagation).
+--bare --dangerously-skip-permissions "<user-prompt>"`.
+   Default text output mode — the agent's final reply is the
+   only thing that lands on stdout.
+4. Exit code mirrors `claude`'s. Non-zero propagates through
+   `nsc ssh` to the daemon's Bash tool, where the parent
+   prompt treats it as a stage failure and skips downstream
+   stages.
 
 Why this design wins over the alternatives:
 
@@ -502,9 +541,10 @@ Why this design wins over the alternatives:
   18b's pre-revision option A): no argv-length hazard, no
   shell-quoting-markdown-through-ssh problem, no need to make
   the model construct ssh invocations. The parent prompt
-  becomes trivial: "run `nsc ssh "$id" -T --
-/opt/symphony/dispatch.sh planner '<json>'`" (credentials
-  come from the env file the wrapper sources, per Decision 4).
+  becomes trivial: "run `nsc ssh "$id" --container_name agent
+-T -- /opt/symphony/dispatch.sh planner '<json>'`"
+  (credentials come from vault-injected container env vars,
+  per Decision 4).
 - **vs. baking the wrapper into a custom base image**
   (pre-revision option B): wrapper updates ship with the
   daemon (source-versioned), no image rebuild required for
@@ -557,111 +597,187 @@ Versioning: when the wrapper script's contract grows beyond
 daemon checks. Today's contract is small enough that ad-hoc
 compatibility is fine.
 
+### Decision 13 — Pre-built `symphony-agent` image carries `claude` + `git` + `gh`
+
+The container `imageRef` (Decision 3) points at an
+operator-built image in the workspace's `nscr.io` registry:
+`nscr.io/<workspace>/symphony-agent:latest`. The Dockerfile
+lives at `docker/symphony-agent.Dockerfile` in the Symphony
+repo. Contents:
+
+- Debian Bookworm slim base (glibc — `claude` install binaries
+  target glibc, so musl/alpine is riskier)
+- `bash`, `curl`, `git`, `gnupg`, `jq`, `openssh-client`
+- `gh` via the GitHub-recommended apt-keyring path
+- `claude` CLI via `curl -fsSL https://claude.ai/install.sh |
+bash` with a symlink to `/usr/local/bin/claude` so PATH
+  doesn't matter
+- `WORKDIR /workspace`; `CMD ["sleep", "infinity"]` so the
+  container stays up for `nsc ssh --container_name agent`
+
+Why baked-in tools rather than installed at provision time:
+
+- Provision-time install (the original Plan 18b draft)
+  required ~30s of `curl | bash` for `claude` alone per
+  dispatch. The image approach moves that work to the
+  operator's one-time image build.
+- Provision-time install also needed to run inside the VM,
+  which meant our `namespace-create.sh` had to ssh in and
+  bootstrap each tool — fragile when network conditions are
+  off. The image bakes them in once, tested at build time.
+- `claude` version pinning becomes "rebuild the image with a
+  new install" instead of "edit a grep regex in
+  namespace-create.sh". Cleaner ops loop.
+
+Why skills + wrapper are NOT baked into the image (still
+uploaded per dispatch per Decision 12): they evolve with the
+daemon's source. Baking them in would mean rebuilding the
+image on every SKILL.md change. Tools (`claude`, `git`, `gh`)
+evolve on Anthropic/GitHub's release cadence — slow enough
+that an image rebuild is fine.
+
+Operator workflow:
+
+1. `nsc build docker -f symphony-agent.Dockerfile --name symphony-agent --push`
+2. Note the registry path (auto-prefixed to
+   `nscr.io/<workspace>/symphony-agent:latest`)
+3. Paste into `namespace-create.sh`'s `NAMESPACE_IMAGE_REF`
+   constant
+
+Rebuild when:
+
+- A new `claude` major version requires a refreshed install
+- We add a new tool to the agent's expected toolset (e.g.
+  `bun`, a language runtime, etc — Plan 18's @coder may want
+  some of these)
+
 ## Steps
 
-### Stage 18b-1 — `@sandbox` provisions claude CLI + Symphony bundle in the VM
+### Stage 18b-1 — Image build + `namespace-create.sh` rewrite
 
-1. Add the in-VM wrapper script at
-   `packages/daemon/src/skills/sandbox/scripts/in-vm/dispatch.sh`
-   per Decision 12. Initial cut: reads SKILL.md from
-   `/opt/symphony/skills/<name>/SKILL.md`, invokes `claude -p`
-   with `--append-system-prompt` from that file and the
-   per-sub-agent allowed-tools list passed in as argv.
-2. Update `namespace-create.sh` to do, after the repo clone:
-   - Install `claude` CLI inside the VM (curl-pipe-bash; pin
-     `^1.0.0 || ^2.0.0` initially; document policy inline).
-   - `nsc instance upload -r` the daemon's `packages/daemon/src/skills/`
-     into `/opt/symphony/skills/` in the VM.
-   - `nsc instance upload` the wrapper script from
-     `packages/daemon/src/skills/sandbox/scripts/in-vm/dispatch.sh`
-     to `/opt/symphony/dispatch.sh` in the VM; `chmod +x` it.
-3. Update `@sandbox`'s SKILL.md (the namespace branch) so
-   operators reading the docs know what's installed and why
-   (`/opt/symphony/` layout + `claude` version range).
-4. Manual smoke: `pnpm symphony` against a `sandbox:namespace`
-   dispatch; verify post-`@sandbox` that
-   `nsc ssh <id> -- ls /opt/symphony/` shows `skills/` and
-   `dispatch.sh`, and that `nsc ssh <id> -- claude --version`
-   reports a version in range.
+1.  Author `docker/symphony-agent.Dockerfile` per Decision 13.
+    Operator-side one-time build + push:
 
-### Stage 18b-2 — Daemon-side `dispatchSubAgent` function with kind-aware routing
+        nsc build docker -f symphony-agent.Dockerfile \
+                  --name symphony-agent --push
 
-5. Add `packages/daemon/src/agent/pipeline/dispatch-subagent.ts`
-   exposing `dispatchSubAgent({ name, sandboxHandle, prompt, allowedTools, env }): AsyncIterable<AgentEvent>`.
-   Note: no longer takes `skillBody` — the wrapper reads it from
-   `/opt/symphony/skills/` inside the VM (Decision 12). Local
-   path still uses the in-memory skill from the daemon's loader,
-   identical to Plan 18a's existing flow.
-6. For `kind.startsWith('local-')`: delegate to Plan 18a's
-   existing SDK `Agent` flow. The function exists primarily to
-   give one entry point; the local path is just a passthrough.
-7. For remote `kind`: spawn `nsc ssh "$id" -T --
-/opt/symphony/dispatch.sh <name> '<inputs-json>'` as a child
-   process with stdout piped. Credentials reach the VM via the
-   uploaded env file (Decision 4); they are NOT on the daemon's
-   argv. Read NDJSON lines from stdout, parse each as
-   `SDKMessage`, feed to `mapSdkMessage`. Yield AgentEvents as
-   they arrive.
-8. Handle: child exit, stdout EOF, malformed JSON lines, abort
-   signal (operator cancel), `nsc ssh` connection drop. Each
-   has a defined `turn_failed` reason. Use the wrapper's final
-   exit-code-mapping stdout line (Decision 12) to disambiguate
-   "ssh broke" from "claude failed".
+    The image lands at `nscr.io/<workspace>/symphony-agent:latest`.
 
-### Stage 18b-3 — Parent prompt: kind-aware dispatch instructions
+2.  Operator stores the two secrets in the Namespace vault UI
+    (ANTHROPIC*API_KEY, GITHUB_TOKEN). Capture the `sec*...` ids.
+3.  Hardcode the image ref + secret ids as constants at the top
+    of `namespace-create.sh` (`NAMESPACE_IMAGE_REF`,
+    `NAMESPACE_SECRET_ANTHROPIC_API_KEY`,
+    `NAMESPACE_SECRET_GITHUB_TOKEN`).
+4.  Rewrite `namespace-create.sh` (full replace of the Plan 17a
+    nsc-create-based flow): - Pre-flight: `nsc`, `curl`, `jq` on PATH; `nsc auth
+check-login`. - `nsc auth generate-dev-token --output_to <tmpfile>` for
+    a per-dispatch bearer token. - POST `ComputeService/CreateInstance` with the body shape
+    from Decision 3 (one container `agent`, `imageRef`,
+    `envVars[].fromSecretId`). - Parse `instanceId` from response. - Poll `nsc ssh <id> --container_name agent -T -- /bin/true`
+    for reachability (bounded 120s). - Clone the target repo inside the container via
+    `nsc ssh --container_name agent -- bash -c 'git clone…'`,
+    using the vault-injected GITHUB_TOKEN inline. - Tar `packages/daemon/src/skills/` and upload via
+    `nsc instance upload --container_name agent ...
+/opt/symphony/skills.tar.gz`; extract in-container. - Upload the wrapper to `/opt/symphony/dispatch.sh`; chmod +x. - Emit SandboxHandle with `kind: "namespace-devbox"`,
+    `worktree_path: "/workspace"`,
+    `exec.template: "nsc ssh <id> --container_name agent -T -- {cmd}"`.
+5.  Add the in-VM wrapper script at
+    `packages/daemon/src/skills/sandbox/scripts/in-vm/dispatch.sh`
+    per Decision 12. Initial cut: reads SKILL.md from
+    `/opt/symphony/skills/<name>/SKILL.md`, invokes `claude -p`
+    with `--append-system-prompt` from that file plus the
+    per-sub-agent allowed-tools list. No env-file sourcing —
+    the container's process inherits ANTHROPIC_API_KEY and
+    GITHUB_TOKEN directly from the platform's vault injection.
+6.  Update `@sandbox`'s SKILL.md (namespace branch) to describe
+    the new `/opt/symphony/` layout (skills + dispatch.sh — NO
+    env file).
+7.  Manual smoke: `pnpm symphony` against a `sandbox:namespace`
+    dispatch; verify post-`@sandbox` that
+    `nsc ssh <id> --container_name agent -- ls /opt/symphony/`
+    shows `skills/` and `dispatch.sh`, and that
+    `nsc ssh <id> --container_name agent -- env` shows
+    `ANTHROPIC_API_KEY` and `GITHUB_TOKEN`.
 
-9. Update `parent-prompt.ts` to include a "post-@sandbox routing"
-   block. After Stage 1 (`@sandbox`), the prompt instructs the
-   parent: "Inspect the `kind` field of the returned
-   `SandboxHandle`. If it starts with `local-`, use the
-   `Agent` tool for Stages 2-4. Otherwise, use the `Bash` tool
-   to invoke `nsc ssh ...` per the template below."
-10. Provide the exact Bash command template inline in the
-    prompt — model behavior is more reliable with the shape
-    spelled out than with a free-form "invoke via ssh"
-    instruction.
-11. Test: `parent-prompt.test.ts` gains assertions on the
-    kind-aware routing language; a new test confirms both
-    dispatch branches are mentioned in order.
+### Stage 18b-2 — Parent prompt: kind-aware dispatch instructions
 
-### Stage 18b-4 — Event-mapping coverage for NDJSON over Bash
+The parent agent already has `Bash` in its tool allowlist
+(per Plan 18a's pre-existing parent tool set), so no new
+daemon-side dispatcher function is needed — the parent
+shells out directly via `Bash` for the namespace path.
 
-12. `event-mapping.ts`: confirm `mapSdkMessage` handles every
-    shape `claude --output-format=stream-json` emits. Likely
-    already true since the CLI's stream-json output is the SDK's
-    internal `SDKMessage` shape, but verify against the
-    CLI's documented schema and add fixtures.
-13. Add a helper `parseNdjsonLines(buf: string): SDKMessage[]`
-    in `event-mapping.ts` that's used by `dispatchSubAgent`'s
-    remote path. Handles partial lines at the buffer boundary.
-14. Test: feed a captured `claude --print --output-format=stream-json`
-    transcript into the parser; assert event sequence matches
-    expectations.
+5.  Update `parent-prompt.ts` to include a "Dispatch routing
+    for Stages 2-4" block after Stage 1. The prompt instructs
+    the parent to inspect `SandboxHandle.kind` and pick the
+    dispatch mode:
+    - `local-*` → SDK `Agent` tool (Plan 18a path, unchanged)
+    - `namespace-devbox` → Bash with the in-VM wrapper
+      template
+6.  In each of Stages 2-4 (`@planner`, `@coder`, `@ci`), add
+    a "For `local-*` kinds" / "For `namespace-devbox` kinds"
+    pair documenting both dispatch modes. The local docs stay
+    identical to Plan 18a/20; the namespace docs reference the
+    Bash template.
+7.  The exact Bash command template, spelled out inline (model
+    behavior is more reliable when the shape is concrete):
 
-### Stage 18b-5 — Credential plumbing: `ANTHROPIC_API_KEY` to the VM via uploaded env file
+        nsc ssh <INSTANCE_ID> --container_name agent -T -- \
+          /opt/symphony/dispatch.sh <NAME> '<INPUTS_JSON>'
 
-15. Confirm the daemon already has `ANTHROPIC_API_KEY` in its
-    process env (it does — the SDK requires it).
-16. Extend `namespace-create.sh` to write the env file:
-    `mktemp` a daemon-side temp with `umask 077`; write
-    `ANTHROPIC_API_KEY=...` and `GITHUB_TOKEN=...` lines;
-    `nsc instance upload "$id" "$tmp" /opt/symphony/env --mkdir`;
-    `rm -f "$tmp"`; then `nsc ssh "$id" -T -- chmod 600
-/opt/symphony/env`. Per Decision 4.
-17. The in-VM wrapper (`/opt/symphony/dispatch.sh`) starts with
-    `set -a; . /opt/symphony/env; set +a` so the secrets reach
-    `claude` via environment, not argv.
-18. `SECURITY.md`: add an "Anthropic key reaches remote
-    sandboxes via uploaded env file" subsection. Match Plan 17b's
-    `GITHUB_TOKEN` discussion style; cross-link to Decision 4.
-19. Verify post-provision: `nsc ssh "$id" -- ls -l
-/opt/symphony/env` shows mode `600`; `nsc ssh "$id" --
-cat /opt/symphony/env` shows the expected key names (NOT
-    in a log capture); but the daemon's own logs do NOT
-    contain the key values. Grep audit on a recent run's log;
-    add a log scrubber test if anything leaks.
+8.  Test: `parent-prompt.test.ts` gains
+    `includes kind-aware dispatch routing for namespace backends`
+    and `per-stage docs cover BOTH dispatch modes for stages 2-4`,
+    plus the prompt-length ceiling bumps from 6.5k → 8.5k chars.
 
-### Stage 18b-6 — End-to-end smoke against a real namespace dispatch
+### Stage 18b-3 — In-VM wrapper output format
+
+The wrapper at `/opt/symphony/dispatch.sh` uses `claude -p` in
+default text output mode (not `--output-format=stream-json`):
+
+- The parent reads the wrapper's stdout via its `Bash` tool.
+  Plain text mode gives the parent the agent's natural reply
+  directly — no NDJSON parsing downstream.
+- The reply contains the structured JSON fence the daemon's
+  existing post-hoc validators (findSandboxHandleInText,
+  CoderResult/CIResult/PlannerResult) scrape for. Same code
+  path as the local-kind dispatches.
+- Streaming intermediate events to the daemon for richer
+  dashboard observability is a future win, not a v1 need.
+
+9. Wrapper invokes `claude --print --append-system-prompt
+"$(cat $SKILL_MD)" --allowed-tools "$ALLOWED_TOOLS" --bare
+--dangerously-skip-permissions "$USER_PROMPT"`.
+10. Wrapper's exit code mirrors claude's; non-zero propagates
+    through `nsc ssh` to the parent's Bash tool, which surfaces
+    the failure to the parent for downstream-skip handling.
+
+### Stage 18b-4 — Vault-injection verification + SECURITY.md note
+
+Credentials reach the agent container via vault
+`envVars[].fromSecretId` (Decision 4); no daemon-side
+credential plumbing is needed beyond the operator pasting two
+`sec_...` ids into the constants in `namespace-create.sh`.
+This stage is verification + documentation, not implementation.
+
+11. Smoke probe before wiring the daemon dispatcher (cheap;
+    one curl + one ssh): create a throwaway instance via the
+    API with the real image + real secret ids; ssh into the
+    `agent` container and run
+    `env | grep -E "^(ANTHROPIC_API_KEY|GITHUB_TOKEN)="`. Both
+    must show up. Destroy the instance. Done during Plan 18b
+    drafting on 2026-05-17 — recorded in the decision log.
+12. `SECURITY.md`: add a "Namespace vault → agent container"
+    subsection covering: (a) where the secrets live (workspace
+    vault), (b) how they reach the container (platform-level
+    injection at container start, not via daemon), (c) what is
+    NOT exposed (argv, daemon process env, daemon logs, on-VM
+    filesystem). Cross-link to Decision 4.
+13. Verify the daemon's logs do NOT contain the secret values
+    on a real dispatch. Standard daemon log scrubber suffices;
+    no special handling per Plan 18b.
+
+### Stage 18b-5 — End-to-end smoke against a real namespace dispatch
 
 19. Create an EDU-NN Linear issue with `sandbox:namespace` label
     (or use the equivalent operator-side issue from dogfood
@@ -691,7 +807,7 @@ cat /opt/symphony/env` shows the expected key names (NOT
     input/output, total dispatch cost in USD. Compare against
     EDU-15 / EDU-16 (local-backend baselines).
 
-### Stage 18b-7 — Docs + tech-debt updates
+### Stage 18b-6 — Docs + tech-debt updates
 
 23. Update `AGENTS.md` to describe the dispatch routing model:
     "for namespace backends, sub-agents run inside the
@@ -718,11 +834,12 @@ cat /opt/symphony/env` shows the expected key names (NOT
   before and after the dispatch — proves no host-fs leak.
 - `local-shell` dispatches continue to pass their existing
   smoke (Plan 17a / 18a parity preserved).
-- `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` reach the sandbox via
-  the uploaded `/opt/symphony/env` file (Decision 4) with mode
-  `600`. Neither appears on `nsc ssh` argv, in any daemon log,
-  or in any `.git/config` after the dispatch. The file inside
-  the microVM dies with the VM at teardown.
+- `ANTHROPIC_API_KEY` and `GITHUB_TOKEN` reach the agent
+  container via Namespace vault `envVars[].fromSecretId`
+  injection (Decision 4) — never written to the daemon
+  filesystem, never on `nsc` argv, never in daemon logs, never
+  in any file inside the microVM. The values are inherited
+  directly into the container's process env at start time.
 - A captured token-cost report shows the namespace dispatch
   within 25% of the local-backend baseline for an
   EDU-15-class issue. If outside, this plan documents the
@@ -795,4 +912,64 @@ cat /opt/symphony/env` shows the expected key names (NOT
 
 ## Decision log
 
-(Empty until execution begins.)
+### 2026-05-17 — Vault-native pivot during Stage 18b-1 drafting
+
+Plan 18b initially drafted around an uploaded env file
+approach (write `ANTHROPIC_API_KEY` to a daemon-side tempfile,
+`nsc instance upload` to `/opt/symphony/env`, wrapper sources
+it). Worked, but put secrets on the VM's disk for the
+dispatch lifetime. User pushed back: "i dont like the idea of
+sending a env file" — wanted to use Namespace's vault primitive.
+
+Vault probing revealed:
+
+- `nsc vault list/add/set/delete` exist for managing secrets,
+  but the CLI has NO flag for attaching them to instances.
+- Per the docs, `ContainerRequest.envVars[].fromSecretId` is
+  the only injection mechanism. Available only via the gRPC
+  API (`/namespace.cloud.compute.v1beta.ComputeService/CreateInstance`),
+  not surfaced anywhere on the CLI.
+- The dispatch instance and the devbox interactive instance
+  (both via `nsc create`) both have `/run/secrets/by_id/`
+  mount points, but those stay empty unless `envVars` were
+  declared at create time. The VM's own `nsc` token also
+  lacks vault read permissions, so there's no runtime-fetch
+  fallback.
+
+Decision: use API-direct with vault attachment. Operator-side
+artifacts:
+
+1. `docker/symphony-agent.Dockerfile` — Debian slim + claude +
+   git + gh. Built and pushed via `nsc build docker -f symphony-agent.Dockerfile
+--name symphony-agent --push`.
+2. Two secrets created in the workspace vault UI:
+   `ANTHROPIC_API_KEY` (sec_u93fk4ekq8) and `GITHUB_TOKEN`
+   (sec_5bukm4tp80) — IDs hardcoded in `namespace-create.sh`
+   for v1.
+
+### 2026-05-17 — Wire-format gotchas caught during the smoke
+
+Two field-naming traps that cost real probe iterations:
+
+- The container's image field is **`imageRef`**, not `image`.
+  The API silently drops `image` (server-side returns 200,
+  container declaration accepted), then containerd later
+  reports "invalid reference format" because the container
+  has no declared image. Caught after grepping the `nsc`
+  binary for proto JSON tags. Pinned in Decision 4.
+- The platform image isn't on docker.io; it must be pre-built
+  in the operator's workspace registry at
+  `nscr.io/<workspace>/...`. Trying `alpine:latest` or
+  `docker.io/library/alpine:latest` both failed with "invalid
+  reference format" — the platform's image-pull layer is
+  scoped to the workspace's nscr.io plus a curated allowlist.
+
+Successful smoke result (instance `fgb1r0h5tjmum`):
+
+    ANTHROPIC_API_KEY=***SET***  (from sec_u93fk4ekq8)
+    GITHUB_TOKEN=***SET***       (from sec_5bukm4tp80)
+    claude --version → 2.1.143 (Claude Code)
+
+Instance destroyed after verification. End-to-end vault-native
+path confirmed working; the namespace-create.sh rewrite + the
+in-VM wrapper update follow the smoke shape verbatim.

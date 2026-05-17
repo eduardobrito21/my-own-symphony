@@ -85,6 +85,40 @@ Rules:
 - The `pino` logger has a `redact` config that masks token-shaped
   values; do not bypass it.
 
+### Plan 18b — Namespace vault for `sandbox:namespace` dispatches
+
+For `sandbox:namespace`-labelled dispatches, the daemon's
+`namespace-create.sh` does NOT thread `ANTHROPIC_API_KEY` or
+`GITHUB_TOKEN` from the daemon's env into the sandbox itself.
+Instead, both secrets are stored in the operator's Namespace
+workspace vault (created once via the Namespace UI). At
+dispatch time, the daemon's API call to
+`ComputeService/CreateInstance` declares each container env var
+with `fromSecretId: "sec_..."` pointing at the vault object.
+Namespace's platform resolves and injects the values into the
+agent container's process at start time.
+
+Properties:
+
+- Neither secret is ever written to the daemon's filesystem.
+- Neither secret is on any `nsc` argv (vault refs are by id).
+- Neither secret appears in daemon logs from the dispatch.
+- The microVM's filesystem never sees a credentials file
+  (`/opt/symphony/env` does NOT exist; the container's env
+  vars come from the platform, not from a sourced file).
+- The agent container's `env` shows both vars; an agent inside
+  the container CAN read them via `$ANTHROPIC_API_KEY` etc.
+  (this is by design — `claude` needs to authenticate).
+
+Operator threat-model note: anyone with `nsc auth` access to
+the workspace can read the vault values via the
+`VaultService.DescribeObject` API on revealable secrets.
+Symphony's daemon assumes this — secrets in the workspace
+vault are operator-trust-equivalent.
+
+For `local-*` dispatches the original env-var inheritance model
+(daemon's env → agent's env) applies unchanged.
+
 ## Filesystem invariants
 
 Enforced in code (`workspace/`) and tested:

@@ -167,6 +167,55 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(stage3Section).toMatch(/plan_path/);
   });
 
+  it('includes kind-aware dispatch routing for namespace backends (Plan 18b)', () => {
+    // Plan 18b: after @sandbox returns, the parent must branch on
+    // SandboxHandle.kind. Local kinds use the Agent tool (Plan 18a
+    // path, unchanged); namespace-devbox kinds shell out via Bash
+    // to the in-VM wrapper. Both must be documented in the prompt.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+    });
+
+    expect(prompt).toMatch(/Dispatch routing for Stages 2-4/);
+    expect(prompt).toMatch(/kind.*starts with.*local-/i);
+    expect(prompt).toMatch(/namespace-devbox/);
+    expect(prompt).toMatch(/nsc ssh/);
+    expect(prompt).toMatch(/--container_name agent/);
+    expect(prompt).toMatch(/\/opt\/symphony\/dispatch\.sh/);
+  });
+
+  it('per-stage docs cover BOTH dispatch modes for stages 2-4', () => {
+    // Belt-and-suspenders: each of @planner, @coder, @ci needs to
+    // tell the parent how to dispatch in BOTH the local and
+    // namespace cases. If a stage forgets to mention the remote
+    // path, the agent falls back to Agent tool for that stage
+    // even on namespace dispatches and the call fails silently.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+    });
+
+    for (const stage of [
+      '## Stage 2 — Dispatch @planner',
+      '## Stage 3 — Dispatch @coder',
+      '## Stage 4 — Dispatch @ci',
+    ]) {
+      const start = prompt.indexOf(stage);
+      expect(start, `missing ${stage}`).toBeGreaterThan(0);
+      // Find the next "## Stage" header (or end of prompt)
+      const next = prompt.indexOf('## Stage', start + stage.length);
+      const sectionEnd = next === -1 ? prompt.length : next;
+      const section = prompt.slice(start, sectionEnd);
+      expect(section, `${stage} missing local-* branch`).toMatch(/For `?local-/);
+      expect(section, `${stage} missing namespace branch`).toMatch(/For `?namespace-devbox/);
+    }
+  });
+
   it("does NOT inline any skill body — that's the sub-agents' job now", () => {
     // Plan 18a invariant: the parent prompt should NEVER contain a
     // SKILL.md body (recognizable by skill-internal phrases like
@@ -186,19 +235,20 @@ describe('buildParentPrompt — pipeline shape', () => {
 
   it('parent prompt is meaningfully smaller than the pre-18a inlined version', () => {
     // Pre-18a `buildPipelinePrompt` produced ~19k chars on a typical
-    // issue (verified live during the Plan 17a smoke). With 18a the
-    // parent prompt dropped to a few thousand. Plan 20 added the
-    // @planner stage, which adds another ~700 chars. Picking 6.5k
-    // as the ceiling: still well below the pre-18a 19k baseline. If
-    // this creeps back up further we've started leaking sub-agent
-    // content into the parent prompt again.
+    // issue (verified live during the Plan 17a smoke). With 18a it
+    // dropped to a few thousand. Plan 20 added @planner (+700 chars).
+    // Plan 18b added kind-aware dispatch routing for namespace
+    // backends (+1.2k chars). Picking 8.5k as the ceiling: still
+    // well below the 19k baseline, but if it creeps further we've
+    // started leaking sub-agent content into the parent prompt
+    // again.
     const prompt = buildParentPrompt({
       issue: makeIssue({ labels: ['priority:high', 'sandbox:namespace'] }),
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
     });
-    expect(prompt.length).toBeLessThan(6500);
+    expect(prompt.length).toBeLessThan(8500);
   });
 });
 
