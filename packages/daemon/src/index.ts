@@ -5,12 +5,9 @@
 // cleanup, and starts the polling loop. SIGINT/SIGTERM trigger a
 // graceful shutdown.
 //
-// ⚠️ Post-ADR 0014 (Plan 15): the execution-backend selector and
-// the per-pod agent runtime have been removed. The orchestrator
-// runs with a `NoopAgentRunner` that emits `turn_failed` on every
-// dispatch — the daemon still polls Linear, the dashboard still
-// renders state, but dispatched issues no-op until Plan 16 wires
-// the in-process Claude SDK + sub-agent pipeline.
+// Plan 16: the sub-agent pipeline is now wired. The PipelineAgentRunner
+// orchestrates @sandbox → @coder stages via the Claude Agent SDK
+// running in the daemon process.
 //
 // Usage:
 //   symphony                          # ./symphony.yaml
@@ -19,7 +16,8 @@
 import { env, exit, stderr, argv } from 'node:process';
 import { resolve } from 'node:path';
 
-import type { AgentEvent, AgentRunInput, AgentRunner } from './agent/runner.js';
+import { PipelineAgentRunner, type ProjectDispatchInfo } from './agent/pipeline/index.js';
+import type { AgentRunner } from './agent/runner.js';
 import { formatWorkflowError } from './config/errors.js';
 import { loadDeployment } from './config/deployment-loader.js';
 import type { ServiceConfig } from './config/schema.js';
@@ -53,12 +51,21 @@ async function main(): Promise<number> {
     project_count: deployment.projects.length,
   });
 
-  // ---- Linear client (host-side, daemon's poll loop) ----
+  // ---- API keys ----
   const linearApiKey = env['LINEAR_API_KEY'];
   if (linearApiKey === undefined || linearApiKey === '') {
     logger.error('LINEAR_API_KEY env var is required (set via your .env file)');
     return 1;
   }
+
+  // Claude SDK reads ANTHROPIC_API_KEY from env automatically; we
+  // check it early to fail fast with a clear error message.
+  if (env['ANTHROPIC_API_KEY'] === undefined || env['ANTHROPIC_API_KEY'] === '') {
+    logger.error('ANTHROPIC_API_KEY env var is required for the Claude Agent SDK');
+    return 1;
+  }
+
+  // ---- Linear client (host-side, daemon's poll loop) ----
   const linearClient = new LinearClient({
     apiKey: linearApiKey,
     endpoint: 'https://api.linear.app/graphql',
@@ -71,8 +78,10 @@ async function main(): Promise<number> {
   });
   logger.info('workspace manager ready', { root: deployment.workspace.root });
 
-  // ---- Per-project trackers ----
+  // ---- Per-project trackers + dispatch info ----
   const projectsMap = new Map<ProjectKey, ProjectContext>();
+  const projectDispatch = new Map<ProjectKey, ProjectDispatchInfo>();
+
   for (const entry of deployment.projects) {
     const key = sanitizeProjectSlug(entry.linear.project_slug);
     if (projectsMap.has(key)) {
@@ -89,6 +98,11 @@ async function main(): Promise<number> {
       activeStates: entry.linear.active_states,
       terminalStates: entry.linear.terminal_states,
     });
+    projectDispatch.set(key, {
+      repoUrl: entry.repo.url,
+      defaultBranch: entry.repo.default_branch,
+      branchPrefix: entry.repo.branch_prefix,
+    });
     logger.info('project ready', {
       project_key: key,
       project_slug: entry.linear.project_slug,
@@ -101,17 +115,23 @@ async function main(): Promise<number> {
   }
   const projects: ProjectContextMap = projectsMap;
 
-  // ---- Agent runner: placeholder until Plan 16 ----
-  // TODO Plan 16: spawn the initial sub-agent here (Claude SDK in
-  // daemon process, orchestrating @infra → @app → @coder → @ci).
-  // Until then, the daemon polls + renders state but dispatched
-  // issues fail loudly with a "no agent wired" message rather than
-  // silently no-op. This matches Plan 15's "daemon that polls but
-  // doesn't dispatch" intent.
-  const agent: AgentRunner = new NoopAgentRunner(logger);
-  logger.warn(
-    'agent runtime not wired — every dispatch will fail with "Plan 16 pending" (see ADR 0014)',
-  );
+  // ---- Agent runner: PipelineAgentRunner (Plan 16) ----
+  const agent: AgentRunner = new PipelineAgentRunner({
+    linearClient,
+    logger,
+    projectDispatch,
+    model: deployment.agent.model,
+    ...(deployment.agent.max_model_round_trips !== undefined && {
+      maxModelRoundTrips: deployment.agent.max_model_round_trips,
+    }),
+    ...(deployment.agent.max_budget_usd !== undefined && {
+      maxBudgetUsd: deployment.agent.max_budget_usd,
+    }),
+  });
+  logger.info('pipeline agent runner ready', {
+    model: deployment.agent.model,
+    max_model_round_trips: deployment.agent.max_model_round_trips,
+  });
 
   // ---- Orchestrator config (synthesized from DeploymentConfig) ----
   const serviceConfig: ServiceConfig = {
@@ -142,10 +162,10 @@ async function main(): Promise<number> {
     },
   };
 
-  // Placeholder prompt template — Plan 16 will route the rendered
-  // prompt through the sub-agent pipeline rather than handing a
-  // single string to one runner.
-  const promptTemplateSource = '<Plan 16 pending: sub-agent pipeline not wired>';
+  // The PipelineAgentRunner builds its own orchestration prompt from
+  // loaded skills. This placeholder satisfies the Orchestrator constructor
+  // signature; the actual prompt is built inside PipelineAgentRunner.run().
+  const promptTemplateSource = '{{ issue.identifier }}: {{ issue.title }}';
 
   // ---- Orchestrator ----
   const orchestrator = new Orchestrator({
@@ -189,29 +209,6 @@ async function main(): Promise<number> {
   return await new Promise<number>(() => {
     // Never resolves — the signal handler exits the process.
   });
-}
-
-/**
- * Stub `AgentRunner` used between Plan 15 (this commit, which deleted
- * the in-pod runtime + ExecutionBackend) and Plan 16 (which will wire
- * the in-process Claude SDK + sub-agent pipeline). Emits a single
- * `turn_failed` event so the orchestrator records the dispatch and
- * moves on with its retry cadence.
- */
-class NoopAgentRunner implements AgentRunner {
-  constructor(private readonly logger: Logger) {}
-
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async *run(input: AgentRunInput): AsyncIterable<AgentEvent> {
-    this.logger.warn('NoopAgentRunner: refusing dispatch (Plan 16 pending)', {
-      issue_identifier: input.issueIdentifier,
-    });
-    yield {
-      kind: 'turn_failed',
-      reason: 'agent runtime not wired (Plan 16 pending — see ADR 0014)',
-      at: new Date(),
-    };
-  }
 }
 
 /**

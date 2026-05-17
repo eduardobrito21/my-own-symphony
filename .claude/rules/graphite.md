@@ -12,19 +12,19 @@ keeps stacks healthy.
 
 ## Command Mapping
 
-| Instead of...              | Use...                                   |
-| -------------------------- | ---------------------------------------- |
-| `git checkout -b <name>`   | `gt create <name>`                       |
-| `git checkout <branch>`    | `gt checkout <branch>` or `gt co`        |
-| `git add . && git commit`  | `gt create -am "msg"`                    |
-| `git commit --amend`       | `gt modify` or `gt m`                    |
-| `git commit`               | `gt modify -c` (new commit on branch)    |
-| `git push`                 | `gt submit`                              |
-| `git push` (whole stack)   | `gt submit --stack` or `gt ss`           |
-| `git pull && git rebase`   | `gt sync`                                |
-| `git log`                  | `gt log` or `gt ls`                      |
-| `git rebase -i`            | `gt reorder` or `gt squash`              |
-| `git branch -d`            | handled by `gt sync` (auto-cleans)       |
+| Instead of...             | Use...                                |
+| ------------------------- | ------------------------------------- |
+| `git checkout -b <name>`  | `gt create <name>`                    |
+| `git checkout <branch>`   | `gt checkout <branch>` or `gt co`     |
+| `git add . && git commit` | `gt create -am "msg"`                 |
+| `git commit --amend`      | `gt modify` or `gt m`                 |
+| `git commit`              | `gt modify -c` (new commit on branch) |
+| `git push`                | `gt submit`                           |
+| `git push` (whole stack)  | `gt submit --stack` or `gt ss`        |
+| `git pull && git rebase`  | `gt sync`                             |
+| `git log`                 | `gt log` or `gt ls`                   |
+| `git rebase -i`           | `gt reorder` or `gt squash`           |
+| `git branch -d`           | handled by `gt sync` (auto-cleans)    |
 
 ## Core Workflow (5 steps)
 
@@ -37,6 +37,7 @@ keeps stacks healthy.
 ## Essential Commands
 
 ### Viewing & Navigation
+
 - `gt log` — see stack with PR info, worktree locations
 - `gt log short` / `gt ls` — see all branches (compact)
 - `gt checkout <branch>` / `gt co` — switch branches
@@ -46,6 +47,7 @@ keeps stacks healthy.
 - `gt bottom` / `gt b` — go to bottom of stack
 
 ### Creating & Modifying
+
 - `gt create [name]` / `gt c` — create new branch from staged changes
 - `gt create -am "msg"` — stage all, commit, create branch
 - `gt create --onto <branch>` — create on top of another branch
@@ -56,6 +58,7 @@ keeps stacks healthy.
 - `gt modify --into` — amend changes to a downstack branch
 
 ### Syncing & Submitting
+
 - `gt sync` — pull trunk, delete merged branches, restack
 - `gt submit` — push current branch + downstack, create/update PRs
 - `gt submit --stack` / `gt ss` — push entire stack
@@ -63,6 +66,7 @@ keeps stacks healthy.
 - `gt get <branch>` — fetch teammate's stack locally
 
 ### Reorganizing
+
 - `gt move` — move branch to new parent
 - `gt fold` — fold branch into parent
 - `gt reorder` — reorder branches in stack
@@ -72,11 +76,13 @@ keeps stacks healthy.
 - `gt pop` — delete branch but keep changes
 
 ### Recovery & Tracking
+
 - `gt undo` — undo last mutation
 - `gt track <branch>` / `gt tr` — start tracking existing branch
 - `gt untrack <branch>` / `gt utr` — stop tracking branch
 
 ### Collaboration
+
 - `gt freeze <branch>` — prevent accidental edits
 - `gt unfreeze <branch>` — allow edits again
 
@@ -114,5 +120,6 @@ Graphite supports multiple Git worktrees. Each worktree has independent
 branch state. Commands affect only the current worktree.
 
 Sources:
+
 - [Graphite Docs](https://graphite.com/docs/)
 - [CLI Cheatsheet](https://graphite.com/docs/cheatsheet)
