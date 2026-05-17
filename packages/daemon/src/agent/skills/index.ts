@@ -18,8 +18,12 @@ export {
   type TeardownConfig,
   CoderResultSchema,
   type CoderResult,
+  PlannerResultSchema,
+  type PlannerResult,
   parseSandboxHandle,
   safeParseSandboxHandle,
   parseCoderResult,
   safeParseCoderResult,
+  parsePlannerResult,
+  safeParsePlannerResult,
 } from './schemas.js';

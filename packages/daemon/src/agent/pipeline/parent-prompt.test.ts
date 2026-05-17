@@ -44,6 +44,7 @@ function skill(name: string, body: string): SkillDefinition {
 function defaultSkills(): Map<string, SkillDefinition> {
   return new Map<string, SkillDefinition>([
     ['sandbox', skill('sandbox', '# sandbox skill body')],
+    ['planner', skill('planner', '# planner skill body')],
     ['coder', skill('coder', '# coder skill body')],
     ['ci', skill('ci', '# ci skill body')],
   ]);
@@ -81,7 +82,7 @@ describe('buildParentPrompt — label surfacing', () => {
     });
 
     const stage1 = prompt.indexOf('## Stage 1 — Dispatch @sandbox');
-    const stage2 = prompt.indexOf('## Stage 2 — Dispatch @coder');
+    const stage2 = prompt.indexOf('## Stage 2 — Dispatch @planner');
     expect(stage1).toBeGreaterThan(0);
     expect(stage2).toBeGreaterThan(stage1);
 
@@ -91,10 +92,11 @@ describe('buildParentPrompt — label surfacing', () => {
 });
 
 describe('buildParentPrompt — pipeline shape', () => {
-  // The parent prompt pins the 4-stage shape so future plans (18b,
-  // 19) don't accidentally drop or reorder stages.
+  // The parent prompt pins the 5-stage shape (Plan 20 added @planner
+  // between @sandbox and @coder) so future plans don't accidentally
+  // drop or reorder stages.
 
-  it('emits the four stages in order', () => {
+  it('emits the five stages in order', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -104,9 +106,10 @@ describe('buildParentPrompt — pipeline shape', () => {
 
     const order = [
       '## Stage 1 — Dispatch @sandbox',
-      '## Stage 2 — Dispatch @coder',
-      '## Stage 3 — Dispatch @ci',
-      '## Stage 4 — Close out',
+      '## Stage 2 — Dispatch @planner',
+      '## Stage 3 — Dispatch @coder',
+      '## Stage 4 — Dispatch @ci',
+      '## Stage 5 — Close out',
     ];
     let cursor = -1;
     for (const heading of order) {
@@ -119,7 +122,7 @@ describe('buildParentPrompt — pipeline shape', () => {
     }
   });
 
-  it('tells the agent to skip Stage 3 when @coder returned no changed files', () => {
+  it('tells the agent to skip Stage 4 when @coder returned no changed files', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -129,11 +132,11 @@ describe('buildParentPrompt — pipeline shape', () => {
 
     // The orchestration prompt must clearly instruct "skip if empty"
     // so the parent agent never invokes @ci for a no-op @coder run.
-    expect(prompt).toMatch(/skip[^\n]*Stage 3/i);
+    expect(prompt).toMatch(/skip[^\n]*Stage 4/i);
     expect(prompt).toMatch(/empty[^\n]*changed_files|changed_files[^\n]*empty/i);
   });
 
-  it('renders the issue URL in the header so Stage 4 can reference it', () => {
+  it('renders the issue URL in the header so Stage 5 can reference it', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue({ url: 'https://linear.app/example/issue/EDU-77' }),
       repoUrl: 'https://github.com/example/repo.git',
@@ -142,6 +145,26 @@ describe('buildParentPrompt — pipeline shape', () => {
     });
 
     expect(prompt).toContain('- URL: https://linear.app/example/issue/EDU-77');
+  });
+
+  it('threads plan_path from PlannerResult into the @coder dispatch', () => {
+    // Plan 20: @planner runs before @coder and may produce a plan
+    // file. The parent prompt must instruct itself to pass plan_path
+    // through to @coder so the coder reads the plan as its
+    // authoritative instruction.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+    });
+
+    const stage3 = prompt.indexOf('## Stage 3 — Dispatch @coder');
+    const stage4 = prompt.indexOf('## Stage 4 — Dispatch @ci');
+    expect(stage3).toBeGreaterThan(0);
+    expect(stage4).toBeGreaterThan(stage3);
+    const stage3Section = prompt.slice(stage3, stage4);
+    expect(stage3Section).toMatch(/plan_path/);
   });
 
   it("does NOT inline any skill body — that's the sub-agents' job now", () => {
@@ -164,18 +187,18 @@ describe('buildParentPrompt — pipeline shape', () => {
   it('parent prompt is meaningfully smaller than the pre-18a inlined version', () => {
     // Pre-18a `buildPipelinePrompt` produced ~19k chars on a typical
     // issue (verified live during the Plan 17a smoke). With 18a the
-    // parent prompt should drop to a few thousand. Picking 5k as the
-    // ceiling: comfortable headroom for issue context but well below
-    // the pre-18a baseline. If this assertion creeps back up over
-    // time, we've started leaking sub-agent content into the parent
-    // prompt again.
+    // parent prompt dropped to a few thousand. Plan 20 added the
+    // @planner stage, which adds another ~700 chars. Picking 6.5k
+    // as the ceiling: still well below the pre-18a 19k baseline. If
+    // this creeps back up further we've started leaking sub-agent
+    // content into the parent prompt again.
     const prompt = buildParentPrompt({
       issue: makeIssue({ labels: ['priority:high', 'sandbox:namespace'] }),
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
     });
-    expect(prompt.length).toBeLessThan(5000);
+    expect(prompt.length).toBeLessThan(6500);
   });
 });
 
@@ -221,6 +244,22 @@ describe('buildSubAgents — SDK config', () => {
 
     expect(ci.tools).not.toContain('Edit');
     expect(ci.tools).not.toContain('Write');
+  });
+
+  it('@planner gets Write (to create plan files) but not Edit', () => {
+    // Plan 20: planner is a creator, not an editor. It writes new
+    // plan files but should NOT edit existing source. Edit lives on
+    // @coder. If planner gained Edit it would be tempted to drift
+    // into implementation work, which is the wrong stage.
+    const agents = buildSubAgents(defaultSkills());
+    const planner = agents['planner'];
+    expect(planner).toBeDefined();
+    if (!planner) return;
+
+    expect(planner.tools).toContain('Write');
+    expect(planner.tools).toContain('Bash');
+    expect(planner.tools).toContain('Read');
+    expect(planner.tools).not.toContain('Edit');
   });
 
   it('no sub-agent gets the linear_graphql tool — that stays on the parent', () => {

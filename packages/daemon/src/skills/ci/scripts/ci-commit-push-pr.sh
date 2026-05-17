@@ -102,14 +102,19 @@ fi
 } >&2
 
 # Compose the commit message: subject is "[IDENT] Issue Title",
-# body has the coder summary if any.
+# body has the coder summary (if any) plus a `Committed-by: @ci`
+# footer so attribution is unambiguous in `git log`. Each sub-agent
+# that commits stamps itself this way (planner uses
+# `Committed-by: @planner`); auditing who-did-what is then a
+# `git log --grep` away.
 COMMIT_SUBJECT="[${SYMPHONY_IDENTIFIER}] ${SYMPHONY_ISSUE_TITLE}"
 COMMIT_BODY="${SYMPHONY_CODER_SUMMARY:-}"
+COMMIT_FOOTER="Committed-by: @ci"
 {
   if [ -n "$COMMIT_BODY" ]; then
-    git commit -m "$COMMIT_SUBJECT" -m "$COMMIT_BODY"
+    git commit -m "$COMMIT_SUBJECT" -m "$COMMIT_BODY" -m "$COMMIT_FOOTER"
   else
-    git commit -m "$COMMIT_SUBJECT"
+    git commit -m "$COMMIT_SUBJECT" -m "$COMMIT_FOOTER"
   fi
 } >&2 || die "git commit failed"
 

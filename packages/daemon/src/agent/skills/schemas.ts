@@ -63,6 +63,39 @@ export const SandboxHandleSchema = z.object({
 export type SandboxHandle = z.infer<typeof SandboxHandleSchema>;
 
 // ---------------------------------------------------------------------------
+// PlannerResult — returned by @planner skill (Plan 20)
+// ---------------------------------------------------------------------------
+
+/**
+ * The structured output `@planner` returns. The planner reads the
+ * issue and decides whether it warrants a written execution plan; if
+ * yes, it writes one to `docs/exec-plans/active/<NN>-<slug>.md` in
+ * the worktree and returns the relative path. If no, it returns
+ * `decision: "skipped"` with a one-line reason.
+ *
+ * `plan_path` is non-null iff `decision === "planned"`. zod doesn't
+ * encode that cross-field invariant directly here — we keep both
+ * fields independent and let the consumer check.
+ */
+export const PlannerResultSchema = z.object({
+  decision: z.enum(['planned', 'skipped']),
+  reason: z.string().min(1),
+  plan_path: z.string().min(1).nullable(),
+});
+
+export type PlannerResult = z.infer<typeof PlannerResultSchema>;
+
+export function parsePlannerResult(input: unknown): PlannerResult {
+  return PlannerResultSchema.parse(input);
+}
+
+export function safeParsePlannerResult(
+  input: unknown,
+): z.SafeParseReturnType<unknown, PlannerResult> {
+  return PlannerResultSchema.safeParse(input);
+}
+
+// ---------------------------------------------------------------------------
 // CoderResult — returned by @coder skill (stub in Plan 16, real in Plan 18)
 // ---------------------------------------------------------------------------
 

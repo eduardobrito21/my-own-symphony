@@ -25,6 +25,7 @@ import type { SkillDefinition } from '../skills/index.js';
  */
 const SUB_AGENT_TOOLS = {
   sandbox: ['Bash', 'Read'] as const,
+  planner: ['Bash', 'Read', 'Write', 'Glob', 'Grep'] as const,
   coder: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const,
   ci: ['Bash', 'Read'] as const,
 } as const;
@@ -38,6 +39,8 @@ const SUB_AGENT_TOOLS = {
 const SUB_AGENT_DESCRIPTIONS = {
   sandbox:
     'Provisions a development environment for the current issue (clones the repo, starts services or microVM as needed) and returns a SandboxHandle JSON.',
+  planner:
+    'Reads the issue and decides whether it warrants a written execution plan. If yes, writes one to docs/exec-plans/active/ in the worktree. Returns a PlannerResult JSON with decision (planned|skipped), reason, and plan_path.',
   coder:
     'Reads the issue description and makes the requested code change inside the sandbox worktree. Returns a CoderResult JSON listing changed files plus a summary.',
   ci: 'Commits the changes the coder made, pushes the branch to origin, and opens (or reuses) a GitHub PR. Returns a CIResult JSON with the PR URL.',
@@ -81,7 +84,7 @@ export function buildSubAgents(
   skills: Map<string, SkillDefinition>,
 ): Record<string, AgentDefinition> {
   const result: Record<string, AgentDefinition> = {};
-  for (const name of ['sandbox', 'coder', 'ci'] as const) {
+  for (const name of ['sandbox', 'planner', 'coder', 'ci'] as const) {
     const skill = skills.get(name);
     const description = SUB_AGENT_DESCRIPTIONS[name];
     const tools = [...SUB_AGENT_TOOLS[name]];
@@ -101,5 +104,5 @@ export function buildSubAgents(
  * Names this module knows how to build sub-agents for. Useful for
  * tests + the runner's REQUIRED_SKILLS list.
  */
-export const SUB_AGENT_NAMES = ['sandbox', 'coder', 'ci'] as const;
+export const SUB_AGENT_NAMES = ['sandbox', 'planner', 'coder', 'ci'] as const;
 export type SubAgentName = (typeof SUB_AGENT_NAMES)[number];
