@@ -5,9 +5,10 @@
 // Claude SDK in the daemon process.
 //
 // The pipeline shape is fixed in v1: @sandbox → @planner → @coder →
-// @ci → close out (the @ci stage is conditional — see runner code).
-// The runner loads skills from the repo (if available) or falls back
-// to bundled defaults.
+// @curator → @ci → close out. @curator and @ci are conditional —
+// both skip when @coder produced an empty `changed_files`. The
+// runner loads skills from the repo (if available) or falls back to
+// bundled defaults.
 
 import type { Logger } from '../../observability/index.js';
 import type { LinearClient } from '../../tracker/linear/client.js';

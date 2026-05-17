@@ -51,7 +51,7 @@ INPUTS_JSON="$2"
 # Refuse unknown sub-agents. @sandbox is excluded — it runs in the
 # daemon (Plan 18b Decision 8), never in the VM.
 case "$SUBAGENT" in
-  planner|coder|ci) ;;
+  planner|coder|curator|ci) ;;
   sandbox) die "@sandbox runs in the daemon, not the sandbox" ;;
   *) die "unknown sub-agent: $SUBAGENT" ;;
 esac
@@ -72,6 +72,7 @@ SKILL_MD="/opt/symphony/skills/$SUBAGENT/SKILL.md"
 case "$SUBAGENT" in
   planner) ALLOWED_TOOLS="Bash,Read,Write,Glob,Grep" ;;
   coder)   ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep" ;;
+  curator) ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep" ;;
   ci)      ALLOWED_TOOLS="Bash,Read" ;;
 esac
 

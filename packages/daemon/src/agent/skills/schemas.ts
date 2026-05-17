@@ -6,7 +6,7 @@
 //
 // Per ADR 0014 / Plan 16: the `SandboxHandle` is the load-bearing
 // contract between `@sandbox` and the downstream stages
-// (`@planner`, `@coder`, `@ci`).
+// (`@planner`, `@coder`, `@curator`, `@ci`).
 
 import { z } from 'zod';
 
@@ -113,6 +113,57 @@ export const CoderResultSchema = z.object({
 });
 
 export type CoderResult = z.infer<typeof CoderResultSchema>;
+
+// ---------------------------------------------------------------------------
+// CuratorResult — returned by @curator skill (Plan 20)
+// ---------------------------------------------------------------------------
+
+/**
+ * One flagged finding from the curator's audit. Surfaced to the
+ * operator via the parent agent's Linear close-out comment.
+ *
+ * `line` is best-effort — the curator omits it when it can't pin a
+ * specific line (e.g. a missing-cross-reference finding that spans
+ * multiple occurrences).
+ */
+export const CuratorFlagSchema = z.object({
+  rule: z.string().min(1),
+  file: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  concern: z.string().min(1),
+  suggested_fix: z.string().min(1),
+});
+
+export type CuratorFlag = z.infer<typeof CuratorFlagSchema>;
+
+/**
+ * Output of `@curator`'s per-pipeline audit. `auto_fixes` are
+ * relative paths the curator already edited in the worktree (`@ci`
+ * will commit them alongside the coder's changes). `flags` are
+ * findings that need human judgement — the parent agent renders
+ * them into the Linear close-out comment.
+ *
+ * `decision: "skipped"` means no rule triggered (e.g. the
+ * changeset was pure code with no harness-relevant content).
+ */
+export const CuratorResultSchema = z.object({
+  decision: z.enum(['audited', 'skipped']),
+  summary: z.string().min(1),
+  auto_fixes: z.array(z.string()),
+  flags: z.array(CuratorFlagSchema),
+});
+
+export type CuratorResult = z.infer<typeof CuratorResultSchema>;
+
+export function parseCuratorResult(input: unknown): CuratorResult {
+  return CuratorResultSchema.parse(input);
+}
+
+export function safeParseCuratorResult(
+  input: unknown,
+): z.SafeParseReturnType<unknown, CuratorResult> {
+  return CuratorResultSchema.safeParse(input);
+}
 
 // ---------------------------------------------------------------------------
 // Validation helpers

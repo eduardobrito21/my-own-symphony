@@ -46,6 +46,7 @@ function defaultSkills(): Map<string, SkillDefinition> {
     ['sandbox', skill('sandbox', '# sandbox skill body')],
     ['planner', skill('planner', '# planner skill body')],
     ['coder', skill('coder', '# coder skill body')],
+    ['curator', skill('curator', '# curator skill body')],
     ['ci', skill('ci', '# ci skill body')],
   ]);
 }
@@ -92,11 +93,11 @@ describe('buildParentPrompt — label surfacing', () => {
 });
 
 describe('buildParentPrompt — pipeline shape', () => {
-  // The parent prompt pins the 5-stage shape (Plan 20 added @planner
-  // between @sandbox and @coder) so future plans don't accidentally
-  // drop or reorder stages.
+  // The parent prompt pins the 6-stage shape (Plan 20 added @planner
+  // between @sandbox and @coder, then @curator between @coder and
+  // @ci) so future plans don't accidentally drop or reorder stages.
 
-  it('emits the five stages in order', () => {
+  it('emits the six stages in order', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -108,8 +109,9 @@ describe('buildParentPrompt — pipeline shape', () => {
       '## Stage 1 — Dispatch @sandbox',
       '## Stage 2 — Dispatch @planner',
       '## Stage 3 — Dispatch @coder',
-      '## Stage 4 — Dispatch @ci',
-      '## Stage 5 — Close out',
+      '## Stage 4 — Dispatch @curator',
+      '## Stage 5 — Dispatch @ci',
+      '## Stage 6 — Close out',
     ];
     let cursor = -1;
     for (const heading of order) {
@@ -122,7 +124,7 @@ describe('buildParentPrompt — pipeline shape', () => {
     }
   });
 
-  it('tells the agent to skip Stage 4 when @coder returned no changed files', () => {
+  it('tells the agent to skip Stages 4 and 5 when @coder returned no changed files', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -130,13 +132,14 @@ describe('buildParentPrompt — pipeline shape', () => {
       branchPrefix: 'symphony/',
     });
 
-    // The orchestration prompt must clearly instruct "skip if empty"
-    // so the parent agent never invokes @ci for a no-op @coder run.
-    expect(prompt).toMatch(/skip[^\n]*Stage 4/i);
+    // Both @curator (Stage 4) and @ci (Stage 5) must be skipped on a
+    // no-op @coder run — curator has nothing to audit, @ci has
+    // nothing to commit.
+    expect(prompt).toMatch(/skip[^\n]*Stages? 4(?:\s*and\s*5)?/i);
     expect(prompt).toMatch(/empty[^\n]*changed_files|changed_files[^\n]*empty/i);
   });
 
-  it('renders the issue URL in the header so Stage 5 can reference it', () => {
+  it('renders the issue URL in the header so Stage 6 can reference it', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue({ url: 'https://linear.app/example/issue/EDU-77' }),
       repoUrl: 'https://github.com/example/repo.git',
@@ -145,6 +148,22 @@ describe('buildParentPrompt — pipeline shape', () => {
     });
 
     expect(prompt).toContain('- URL: https://linear.app/example/issue/EDU-77');
+  });
+
+  it("threads @curator's flags into the close-out Linear comment", () => {
+    // Plan 20 — @curator returns harness-graph findings the operator
+    // sees in Linear. If the parent prompt doesn't explicitly tell
+    // the agent how to render flags, they vanish silently.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+    });
+
+    expect(prompt).toMatch(/Curator findings/);
+    expect(prompt).toMatch(/CuratorResult\.flags/);
+    expect(prompt).toMatch(/auto_fixes[^.]*do not include/i);
   });
 
   it('threads plan_path from PlannerResult into the @coder dispatch', () => {
@@ -160,7 +179,7 @@ describe('buildParentPrompt — pipeline shape', () => {
     });
 
     const stage3 = prompt.indexOf('## Stage 3 — Dispatch @coder');
-    const stage4 = prompt.indexOf('## Stage 4 — Dispatch @ci');
+    const stage4 = prompt.indexOf('## Stage 4 — Dispatch @curator');
     expect(stage3).toBeGreaterThan(0);
     expect(stage4).toBeGreaterThan(stage3);
     const stage3Section = prompt.slice(stage3, stage4);
@@ -179,7 +198,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       branchPrefix: 'symphony/',
     });
 
-    expect(prompt).toMatch(/Dispatch routing for Stages 2-4/);
+    expect(prompt).toMatch(/Dispatch routing for Stages 2-5/);
     expect(prompt).toMatch(/kind.*starts with.*local-/i);
     expect(prompt).toMatch(/namespace-devbox/);
     expect(prompt).toMatch(/nsc ssh/);
@@ -187,10 +206,10 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(prompt).toMatch(/\/opt\/symphony\/dispatch\.sh/);
   });
 
-  it('per-stage docs cover BOTH dispatch modes for stages 2-4', () => {
-    // Belt-and-suspenders: each of @planner, @coder, @ci needs to
-    // tell the parent how to dispatch in BOTH the local and
-    // namespace cases. If a stage forgets to mention the remote
+  it('per-stage docs cover BOTH dispatch modes for stages 2-5', () => {
+    // Belt-and-suspenders: each of @planner, @coder, @curator, @ci
+    // needs to tell the parent how to dispatch in BOTH the local
+    // and namespace cases. If a stage forgets to mention the remote
     // path, the agent falls back to Agent tool for that stage
     // even on namespace dispatches and the call fails silently.
     const prompt = buildParentPrompt({
@@ -203,7 +222,8 @@ describe('buildParentPrompt — pipeline shape', () => {
     for (const stage of [
       '## Stage 2 — Dispatch @planner',
       '## Stage 3 — Dispatch @coder',
-      '## Stage 4 — Dispatch @ci',
+      '## Stage 4 — Dispatch @curator',
+      '## Stage 5 — Dispatch @ci',
     ]) {
       const start = prompt.indexOf(stage);
       expect(start, `missing ${stage}`).toBeGreaterThan(0);
@@ -235,20 +255,19 @@ describe('buildParentPrompt — pipeline shape', () => {
 
   it('parent prompt is meaningfully smaller than the pre-18a inlined version', () => {
     // Pre-18a `buildPipelinePrompt` produced ~19k chars on a typical
-    // issue (verified live during the Plan 17a smoke). With 18a it
-    // dropped to a few thousand. Plan 20 added @planner (+700 chars).
-    // Plan 18b added kind-aware dispatch routing for namespace
-    // backends (+1.2k chars). Picking 8.5k as the ceiling: still
-    // well below the 19k baseline, but if it creeps further we've
-    // started leaking sub-agent content into the parent prompt
-    // again.
+    // issue. With 18a it dropped to a few thousand. Each subsequent
+    // plan added a bit: @planner (+700), kind-aware routing (+1.2k),
+    // @curator stage + flag rendering (+1.5k). Picking 11k as the
+    // ceiling: still well below the 19k baseline, but tight enough
+    // that we notice if a sub-agent prompt starts leaking into the
+    // parent again.
     const prompt = buildParentPrompt({
       issue: makeIssue({ labels: ['priority:high', 'sandbox:namespace'] }),
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
     });
-    expect(prompt.length).toBeLessThan(8500);
+    expect(prompt.length).toBeLessThan(11000);
   });
 });
 
@@ -312,6 +331,24 @@ describe('buildSubAgents — SDK config', () => {
     expect(planner.tools).not.toContain('Edit');
   });
 
+  it('@curator gets Edit and Write (auto-fix harness drift in place)', () => {
+    // Plan 20 curator: unlike @planner (creator-only) or @ci
+    // (read-only), the curator needs to mutate existing files —
+    // stamping frontmatter, adding entries to indexes, fixing typo
+    // cross-references. Both Edit (for in-place changes) and Write
+    // (for less common cases like creating a missing index.md) are
+    // required. Bash is also needed for `git diff`.
+    const agents = buildSubAgents(defaultSkills());
+    const curator = agents['curator'];
+    expect(curator).toBeDefined();
+    if (!curator) return;
+
+    expect(curator.tools).toContain('Edit');
+    expect(curator.tools).toContain('Write');
+    expect(curator.tools).toContain('Bash');
+    expect(curator.tools).toContain('Read');
+  });
+
   it('no sub-agent gets the linear_graphql tool — that stays on the parent', () => {
     const agents = buildSubAgents(defaultSkills());
     for (const name of SUB_AGENT_NAMES) {
@@ -336,7 +373,9 @@ describe('buildSubAgents — SDK config', () => {
           'Run `bash "$SKILL_DIR/scripts/local-create.sh"` and also `${SKILL_DIR}/scripts/x.sh`.',
         ),
       ],
+      ['planner', skill('planner', 'No script refs in @planner.')],
       ['coder', skill('coder', 'No script refs in @coder.')],
+      ['curator', skill('curator', 'No script refs in @curator.')],
       ['ci', skill('ci', 'Run `bash "$SKILL_DIR/scripts/ci-commit-push-pr.sh"`.')],
     ]);
     const agents = buildSubAgents(skills);
@@ -354,12 +393,16 @@ describe('buildSubAgents — SDK config', () => {
   it('includes the full SKILL.md body verbatim in each sub-agent prompt', () => {
     const skills = new Map<string, SkillDefinition>([
       ['sandbox', skill('sandbox', '# sandbox skill body\nsentinel-sb-12345')],
+      ['planner', skill('planner', '# planner skill body\nsentinel-pl-12345')],
       ['coder', skill('coder', '# coder skill body\nsentinel-co-12345')],
+      ['curator', skill('curator', '# curator skill body\nsentinel-cu-12345')],
       ['ci', skill('ci', '# ci skill body\nsentinel-ci-12345')],
     ]);
     const agents = buildSubAgents(skills);
     expect(agents['sandbox']?.prompt).toContain('sentinel-sb-12345');
+    expect(agents['planner']?.prompt).toContain('sentinel-pl-12345');
     expect(agents['coder']?.prompt).toContain('sentinel-co-12345');
+    expect(agents['curator']?.prompt).toContain('sentinel-cu-12345');
     expect(agents['ci']?.prompt).toContain('sentinel-ci-12345');
   });
 });
