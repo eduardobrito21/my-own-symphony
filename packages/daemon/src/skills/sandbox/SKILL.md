@@ -1,142 +1,120 @@
 # @sandbox Skill — Provision a Development Environment
 
-You are executing the `@sandbox` skill. Your job is to provision a
-development environment (sandbox) where code changes can be made and
-tested.
+You are executing the `@sandbox` skill. Your job is small:
 
-## Your Task
+1. Read the issue's `labels` input to pick a backend.
+2. Run the corresponding **pre-set script** under
+   `$SKILL_DIR/scripts/`.
+3. Emit the JSON the script printed to stdout as the final
+   `SandboxHandle`.
 
-1. Clone the repository into a worktree
-2. Start the development services (if docker-compose.yml exists)
-3. Return a `SandboxHandle` JSON object
+The script does the real work. You are the dispatcher.
 
 ## Input
 
-You will receive:
+You will receive (from the parent agent's Stage 1 input block):
 
-- `repo_url`: The Git repository URL to clone
-- `default_branch`: The repo's default branch (e.g., "main") — used as
-  the base for new work branches
-- `branch`: The work branch to checkout (or create)
-- `identifier`: Issue identifier for naming (e.g., "ENG-123")
+- `repo_url` — Git repository URL.
+- `default_branch` — repo's default branch (e.g. `main`).
+- `branch` — work branch to checkout/create.
+- `identifier` — issue identifier (e.g. `EDU-13`).
+- `labels` — comma-separated list of the issue's labels.
 
-## Steps to Execute
+The parent prompt also injects `$SKILL_DIR` — the absolute path to
+this skill's directory on disk. The scripts live at
+`$SKILL_DIR/scripts/`.
 
-### Step 1: Confirm the Worktree Directory
+## Step 0 — Pick the backend
 
-The daemon already prepared a per-issue workspace and set it as your
-current working directory. Use that directory as the worktree — do not
-clone into `/tmp` or anywhere else.
+Scan `labels` for any value matching `sandbox:<backend>`. Known
+backends: `local`, `namespace`, `aws`.
 
-```bash
-# The daemon's per-issue workspace is your cwd. Capture absolute paths.
-WORKTREE_PATH="$(pwd)"
-SANDBOX_ID="symphony-${identifier}"   # substitute the issue identifier from Input
-```
+| `sandbox:*` matches found | Action                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------- |
+| 0                         | Use `local` (operator default).                                                           |
+| 1, value in known set     | Use that backend.                                                                         |
+| 1, value NOT in known set | **Fail loud.** Print: `unknown sandbox backend '<value>' — known: local, namespace, aws`. |
+| 2+                        | **Fail loud.** Print: `multiple sandbox:* labels found: <list>`.                          |
 
-### Step 2: Clone or Update Repository
+## Step 1 — Run the create script
 
-The worktree must always start from the **latest upstream state of the
-default branch**. On a fresh dispatch the directory is empty so we
-clone; on a re-dispatch the directory already has a checkout and we
-fast-forward the default branch before creating/switching to the work
-branch.
+The create scripts are deterministic shell programs. They take
+inputs as **environment variables** and emit the `SandboxHandle` on
+stdout. Human-readable progress goes to stderr — do not include
+stderr in the final JSON output.
 
-```bash
-# Fresh dispatch: clone into the cwd
-if [ ! -d ".git" ]; then
-  git clone "${repo_url}" .
-fi
-
-# Always sync with upstream
-git fetch origin
-
-# Bring the default branch up to date with origin. --ff-only refuses
-# to rewrite local history — if the local default branch has diverged
-# (it shouldn't, the daemon owns this dir) the skill must fail loudly
-# rather than silently merging or discarding commits.
-git checkout "${default_branch}"
-git pull --ff-only origin "${default_branch}"
-
-# Switch to (or create) the work branch from the freshly-updated default
-git checkout "${branch}" 2>/dev/null || git checkout -b "${branch}" "${default_branch}"
-```
-
-### Step 3: Start Services (if applicable)
-
-If the repository has a `docker-compose.yml` or `compose.yml`:
+Use the `Bash` tool to invoke the script:
 
 ```bash
-# Use the sandbox ID as the compose project name for isolation
-export COMPOSE_PROJECT_NAME="${SANDBOX_ID}"
-
-if [ -f "docker-compose.yml" ] || [ -f "compose.yml" ]; then
-  docker compose up -d
-fi
+SYMPHONY_REPO_URL="<repo_url>" \
+SYMPHONY_DEFAULT_BRANCH="<default_branch>" \
+SYMPHONY_BRANCH="<branch>" \
+SYMPHONY_IDENTIFIER="<identifier>" \
+  bash "$SKILL_DIR/scripts/<backend>-create.sh"
 ```
 
-### Step 4: Return SandboxHandle
+Where `<backend>` is `local`, `namespace`, or `aws` (the picked
+one). Substitute the input values into the env vars.
 
-After completing the above steps, you MUST output a JSON object with
-this exact structure:
+The script will:
 
+- Validate its inputs and any prerequisites (`git`, `docker`,
+  `nsc`, auth) — failing loud with an actionable error if a
+  prerequisite is missing.
+- Provision the environment (clone, start services / create
+  microVM / etc.).
+- Print a single JSON object — the `SandboxHandle` — to stdout.
+
+If the script exits non-zero, the dispatch has failed. Report the
+last `[<backend>-create] ERROR: ...` line from stderr and stop.
+
+## Step 2 — Emit the SandboxHandle
+
+The script's stdout is already a well-formed `SandboxHandle`. Echo
+it back wrapped in a fenced ```json block as your final output:
+
+````
 ```json
-{
-  "id": "<SANDBOX_ID>",
-  "kind": "local-docker",
-  "worktree_path": "<absolute path to worktree>",
-  "exec": {
-    "kind": "shell-template",
-    "template": "docker compose -p <SANDBOX_ID> exec app {cmd}"
-  },
-  "teardown": {
-    "kind": "script",
-    "script": "docker compose -p <SANDBOX_ID> down -v"
-  }
-}
+{ ... the JSON the script printed ... }
 ```
+````
 
-If no docker-compose exists (simple repo), return:
+The parent agent extracts the **last** ```json block from your
+output, so this should be the last thing you print.
 
-```json
-{
-  "id": "<SANDBOX_ID>",
-  "kind": "local-shell",
-  "worktree_path": "<absolute path to worktree>",
-  "exec": {
-    "kind": "shell-template",
-    "template": "cd <worktree_path> && {cmd}"
-  },
-  "teardown": {
-    "kind": "script",
-    "script": "rm -rf <worktree_path>"
-  }
-}
-```
+Do not modify or reformat the JSON. The script is the authority on
+backend-specific fields (`kind`, `exec.template`, `teardown`).
 
-## Output Format
+## Branch reference (informational)
 
-Your final output MUST be a valid JSON object matching the SandboxHandle
-schema. Output it as the last thing you produce, wrapped in a code block:
+| Backend     | Script                      | `kind`             | Typical `exec.template`                         |
+| ----------- | --------------------------- | ------------------ | ----------------------------------------------- |
+| `local`     | `local-create.sh`           | `local-docker`     | `docker compose -p {id} exec app sh -c '{cmd}'` |
+| `local`     | `local-create.sh`           | `local-shell`      | `cd {worktree_path} && {cmd}`                   |
+| `namespace` | `namespace-create.sh`       | `namespace-devbox` | `nsc ssh {id} -T -- {cmd}`                      |
+| `aws`       | `aws-create.sh` (not in v1) | `aws-ec2`          | (not implemented in v1)                         |
 
-```json
-{ ... your SandboxHandle ... }
-```
+The `aws-create.sh` script does not exist yet — selecting the
+`aws` backend in v1 should fail with an actionable error from the
+missing-script path.
 
-## Error Handling
+## Idempotency notes
 
-- If `git clone` fails: Report the error and fail the skill
-- If `docker compose up` fails: Report the error and fail the skill
-- If the directory already exists: Reuse it (idempotent)
+- `local-create.sh` reuses the daemon's per-issue workspace
+  (which is its cwd) and fast-forwards the default branch. Safe
+  to re-run.
+- `namespace-create.sh` passes `--unique_tag symphony-<identifier>`
+  to `nsc create`, which is exactly idempotent: a second call
+  with the same tag returns the same instance id. Validated
+  2026-05-17.
 
-## Important Notes
+## Why a script rather than agent-inline shell?
 
-- The `exec.template` field uses `{cmd}` as a placeholder. Downstream
-  stages will substitute actual commands.
-- The `id` should be deterministic for the same (repo, identifier) pair
-  to support idempotent re-dispatch.
-- Always use absolute paths for `worktree_path`. The current working
-  directory `$(pwd)` is already absolute — use it directly.
-- Do NOT clone into `/tmp/...`. The daemon's per-issue workspace (your
-  cwd) is the canonical worktree location and is cleaned up by the
-  workspace manager between runs.
+The decision (Plan 17a, 2026-05-17): the create / teardown step
+is procedural — there is one right command sequence per backend,
+known to the operator. Having the agent re-derive that sequence
+every dispatch is expensive (tokens) and brittle (transcription
+errors). Scripts are deterministic, reviewable as plain bash, and
+testable in isolation. The agent's remaining job — picking the
+backend from labels and emitting structured output — is exactly
+the kind of work agents are good at.

@@ -27,6 +27,7 @@ function makeInput(workspacePath: string, attempt: number | null = null): AgentR
     issueIdentifier: IssueIdentifier('EDU-99'),
     workspacePath,
     prompt: 'test prompt',
+    labels: [],
     attempt,
   };
 }

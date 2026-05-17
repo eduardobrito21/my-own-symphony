@@ -30,6 +30,13 @@ export interface AgentRunInput {
   readonly workspacePath: string;
   /** Already-rendered prompt string (the workflow body for this issue). */
   readonly prompt: string;
+  /**
+   * The Linear issue's labels, lowercased per SPEC §11.3. Surfaced to
+   * the parent agent so the `@sandbox` dispatcher (Plan 17a) can pick
+   * a backend from `sandbox:<backend>` labels. MockAgent paths can
+   * ignore this field.
+   */
+  readonly labels: readonly string[];
   readonly attempt: number | null;
   /**
    * Optional cancellation signal. If aborted, the agent SHOULD

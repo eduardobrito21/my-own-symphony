@@ -387,6 +387,7 @@ export class Orchestrator {
           issueIdentifier: issue.identifier,
           workspacePath: workspace.path,
           prompt: renderResult.value,
+          labels: issue.labels,
           attempt: null,
           signal,
         });

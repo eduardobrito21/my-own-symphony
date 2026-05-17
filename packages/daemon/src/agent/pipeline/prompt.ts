@@ -6,6 +6,8 @@
 // This module builds the orchestration prompt that includes the skill
 // markdowns.
 
+import { dirname } from 'node:path';
+
 import type { Issue } from '../../types/index.js';
 import type { SkillDefinition } from '../skills/index.js';
 
@@ -46,6 +48,7 @@ export function buildPipelinePrompt(context: PipelinePromptContext): string {
       context.defaultBranch,
       branchName,
       issue.identifier,
+      issue.labels,
     ),
     buildStage2CoderSection(coderSkill, issue),
     buildStage3CloseOutSection(issue),
@@ -56,6 +59,7 @@ export function buildPipelinePrompt(context: PipelinePromptContext): string {
 }
 
 function buildHeader(issue: Issue): string {
+  const labelLine = issue.labels.length === 0 ? '(none)' : issue.labels.join(', ');
   return `# Symphony Pipeline — Issue ${issue.identifier}
 
 You are the Symphony orchestration agent. Your job is to execute a
@@ -66,7 +70,8 @@ Issue details:
 - Identifier: ${issue.identifier}
 - Title: ${issue.title}
 - Description: ${issue.description ?? '(no description)'}
-- State: ${issue.state}`;
+- State: ${issue.state}
+- Labels: ${labelLine}`;
 }
 
 function buildPipelineOverview(): string {
@@ -87,8 +92,15 @@ function buildStage1SandboxSection(
   defaultBranch: string,
   branchName: string,
   identifier: string,
+  labels: readonly string[],
 ): string {
   const skillContent = skill?.markdown ?? '(skill not found)';
+  const labelLine = labels.length === 0 ? '(none)' : labels.join(', ');
+  // The @sandbox skill ships pre-set provisioning scripts alongside
+  // SKILL.md (see packages/daemon/src/skills/sandbox/scripts/). The
+  // agent invokes them by absolute path; we inject the directory here
+  // so the skill markdown doesn't have to guess where it lives on disk.
+  const skillDir = skill?.path !== undefined ? dirname(skill.path) : '(skill not found)';
 
   return `## Stage 1: @sandbox — Provision Development Environment
 
@@ -100,6 +112,20 @@ development environment.
 - default_branch: ${defaultBranch}
 - branch: ${branchName}
 - identifier: ${identifier}
+- labels: ${labelLine}
+
+The \`labels\` input drives @sandbox's backend selection. A
+\`sandbox:<backend>\` label (e.g. \`sandbox:namespace\`) selects a
+backend; with no such label, fall back to the operator default
+(\`local\`).
+
+The @sandbox skill lives on disk at:
+
+    SKILL_DIR=${skillDir}
+
+Its bundled provisioning scripts are at \`$SKILL_DIR/scripts/\`. The
+skill instructs you to invoke them by absolute path (e.g.
+\`bash "$SKILL_DIR/scripts/local-create.sh"\`).
 
 <sandbox_skill>
 ${skillContent}

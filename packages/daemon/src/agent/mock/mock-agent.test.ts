@@ -11,6 +11,7 @@ function input(overrides: Partial<AgentRunInput> = {}): AgentRunInput {
     issueIdentifier: IssueIdentifier('SYMP-1'),
     workspacePath: '/tmp/ws',
     prompt: 'do the thing',
+    labels: [],
     attempt: null,
     ...overrides,
   };

@@ -264,7 +264,7 @@ export class PipelineAgentRunner implements AgentRunner {
       state: 'Todo',
       branchName: null,
       url: null,
-      labels: [],
+      labels: input.labels,
       blockedBy: [],
       createdAt: null,
       updatedAt: null,
