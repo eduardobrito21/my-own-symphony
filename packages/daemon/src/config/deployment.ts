@@ -129,29 +129,13 @@ export function buildDeploymentConfigSchema(baseDir: string) {
     .strict()
     .default({});
 
-  // ---- execution (NEW — Plan 09 / ADR 0011) --------------------------
-
-  const ExecutionConfigSchema = z
-    .object({
-      // Where the agent process runs:
-      //   - `local-docker` (default, Plan 10): per-issue Docker pods
-      //     via `LocalDockerBackend`. Production target.
-      //   - `in-process`: the daemon constructs `ClaudeAgent` and
-      //     runs it in its own process — no docker needed. Useful
-      //     for local development against a single repo without
-      //     the image-build cycle. Inherits the daemon's
-      //     filesystem + network; no isolation boundary.
-      // Future: `e2b`, `ecs`, etc.
-      backend: z.enum(['local-docker', 'in-process']).default('local-docker'),
-      // The default agent image to use when a project does not
-      // specify `agent_image` and does not ship a
-      // `.symphony/agent.dockerfile` or `.devcontainer/Dockerfile`.
-      // See Plan 10 step 7 for the full image-resolution order.
-      // Ignored when `backend: in-process`.
-      base_image: z.string().min(1).default('symphony/agent-base:1'),
-    })
-    .strict()
-    .default({});
+  // ---- execution -----------------------------------------------------
+  //
+  // Removed in Plan 15. The `execution.backend` selector
+  // (`local-docker` / `in-process`) and `execution.base_image` are
+  // gone — ADR 0014 moves platform choice into the agent's @infra
+  // skill. The `skills:` section that replaces it is deferred to
+  // Plan 16.
 
   // ---- hooks (deployment-wide hook timeout only) ---------------------
 
@@ -217,7 +201,6 @@ export function buildDeploymentConfigSchema(baseDir: string) {
       polling: PollingConfigSchema,
       workspace: WorkspaceConfigSchema,
       agent: AgentConfigSchema,
-      execution: ExecutionConfigSchema,
       hooks: HooksConfigSchema,
       projects: z
         .array(ProjectEntrySchema)
@@ -234,7 +217,6 @@ export type DeploymentConfig = z.infer<DeploymentConfigSchema>;
 export type ProjectEntry = DeploymentConfig['projects'][number];
 export type LinearTrackerSpec = ProjectEntry['linear'];
 export type RepoSpec = ProjectEntry['repo'];
-export type ExecutionConfig = DeploymentConfig['execution'];
 
 /**
  * The deployment definition returned by the loader: the typed config

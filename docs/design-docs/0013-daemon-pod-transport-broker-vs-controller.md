@@ -153,18 +153,18 @@ URL into `symphony.yaml`."
 
 ### Comparison
 
-| Concern                         | ADR 0011 (today)            | Pattern A (daemon HTTP) | Pattern B (Redis broker)         |
-| ------------------------------- | --------------------------- | ----------------------- | -------------------------------- |
-| Daemon must be publicly reachable | No                          | **Yes** (regression)    | No                               |
-| Pod → broker direction          | Pod connects to daemon TCP  | Pod HTTPs daemon URL    | Pod TCPs Redis URL               |
-| Auth mechanism                  | Loopback only               | Custom bearer tokens    | Redis ACL                        |
-| Bidirectional commands          | Not supported               | Long-poll endpoint      | Pub/sub native                   |
-| Daemon-restart resilience       | Event stream lost           | Pod retries poll        | Resume from stream by ack offset |
-| Process count to deploy        | 2 (daemon, dashboard)        | 2 (unchanged)           | 3 (one is SaaS)                  |
-| New runtime dependency          | None                        | None                    | Hosted Redis                     |
-| DevBox vs Instance              | Open (Plan 14 unresolved)   | Settled — Instance      | Settled — Instance               |
-| Devbox / instance leak guard    | Compute `deadline` field    | Compute `deadline`      | Compute `deadline` + Redis state reconcile |
-| State location                  | In-daemon memory            | In-daemon memory        | Redis (durable)                  |
+| Concern                           | ADR 0011 (today)           | Pattern A (daemon HTTP) | Pattern B (Redis broker)                   |
+| --------------------------------- | -------------------------- | ----------------------- | ------------------------------------------ |
+| Daemon must be publicly reachable | No                         | **Yes** (regression)    | No                                         |
+| Pod → broker direction            | Pod connects to daemon TCP | Pod HTTPs daemon URL    | Pod TCPs Redis URL                         |
+| Auth mechanism                    | Loopback only              | Custom bearer tokens    | Redis ACL                                  |
+| Bidirectional commands            | Not supported              | Long-poll endpoint      | Pub/sub native                             |
+| Daemon-restart resilience         | Event stream lost          | Pod retries poll        | Resume from stream by ack offset           |
+| Process count to deploy           | 2 (daemon, dashboard)      | 2 (unchanged)           | 3 (one is SaaS)                            |
+| New runtime dependency            | None                       | None                    | Hosted Redis                               |
+| DevBox vs Instance                | Open (Plan 14 unresolved)  | Settled — Instance      | Settled — Instance                         |
+| Devbox / instance leak guard      | Compute `deadline` field   | Compute `deadline`      | Compute `deadline` + Redis state reconcile |
+| State location                    | In-daemon memory           | In-daemon memory        | Redis (durable)                            |
 
 Both patterns settle the DevBox vs Instance question in favor
 of `Compute.Instance`: once the daemon no longer needs a
@@ -222,15 +222,15 @@ question (only one of them surfaces this metadata cleanly).
 ### Postgres LISTEN/NOTIFY as the broker (instead of Redis)
 
 Same shape as Pattern B, different storage. Rejected as the
-*default* but kept as a fallback: an operator who already
+_default_ but kept as a fallback: an operator who already
 runs a Postgres they trust may prefer it. The implementation
 plan should keep the broker behind an interface so both can
 be supported without code branching at every call site.
 
 ## Consequences
 
-The consequences below are written for the *adoption of either
-pattern over today's ADR 0011 transport*. Pattern-specific
+The consequences below are written for the _adoption of either
+pattern over today's ADR 0011 transport_. Pattern-specific
 consequences are called out where they differ.
 
 **Easier:**
@@ -271,12 +271,12 @@ consequences are called out where they differ.
   bearer-token issuance + rotation system. This is the
   pattern's load-bearing cost.
 - (Pattern B only) Hosted Redis is a new runtime dependency
-  + recurring vendor cost (~free at the v1 scale named in
-  ADR 0012; small at any scale Symphony plausibly hits).
-  Daemon correctness depends on Redis being reachable; the
-  hosted SLA is typically better than the daemon's own SLA,
-  so this is plausibly an availability gain — but it is
-  another vendor on the diagram.
+  - recurring vendor cost (~free at the v1 scale named in
+    ADR 0012; small at any scale Symphony plausibly hits).
+    Daemon correctness depends on Redis being reachable; the
+    hosted SLA is typically better than the daemon's own SLA,
+    so this is plausibly an availability gain — but it is
+    another vendor on the diagram.
 - The transport contract becomes a stable interface across
   every backend. Breaking it requires both `LocalDockerBackend`
   and `NamespaceBackend` to adapt simultaneously.

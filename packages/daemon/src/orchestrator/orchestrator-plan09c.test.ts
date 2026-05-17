@@ -13,8 +13,6 @@
 //   6. Reconcile fans out per-project (terminal state in project A
 //      terminates project A's worker without touching project B).
 //
-// We use FakeBackend isn't relevant here — Plan 09c keeps the
-// orchestrator on AgentRunner (Plan 10 swaps to ExecutionBackend).
 // Tests inject MockAgent for fast turns.
 
 import { mkdtemp, rm, stat } from 'node:fs/promises';
