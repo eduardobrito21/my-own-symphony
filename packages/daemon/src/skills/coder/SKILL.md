@@ -13,10 +13,32 @@ description and make the code change it asks for.
 
 - `issue_identifier` — e.g. `EDU-13`.
 - `issue_title` — short summary.
-- `issue_description` — the body of the Linear issue. **This is your
-  instruction.** Follow it literally.
+- `issue_description` — the body of the Linear issue.
 - `sandbox_handle` — the JSON `@sandbox` returned. The fields you
   need: `kind`, `worktree_path`, and `exec.template`.
+- `plan_path` (Plan 20) — relative path to an exec plan @planner
+  wrote, or the literal string `null` / the word `null` if @planner
+  skipped. **If non-null, this plan is your authoritative
+  instruction** — read it first; it supersedes `issue_description`
+  as the source of truth for what to implement.
+
+## Authoritative instruction
+
+If `plan_path` is non-null:
+
+- Read `<sandbox_handle.worktree_path>/<plan_path>` via the `Read`
+  tool.
+- Implement what the plan's **Steps** section describes, scoped by
+  its **Goal** and bounded by its **Out of scope** section.
+- The plan's **Definition of done** is the target you are trying
+  to satisfy. Implement against it directly. (Note: a future
+  `@tester` sub-agent — Plan 18 — will independently verify the
+  DoD is met. `@curator` does NOT verify implementation
+  correctness; its concern is harness-level consistency, not
+  whether your code does what it says it does.)
+
+If `plan_path` is null, fall back to `issue_description` as your
+instruction (follow it literally).
 
 ## Where the files live
 
@@ -66,8 +88,14 @@ Constraints (MVP):
   `package.json` `dependencies` (you may still edit version numbers
   if that's the explicit request).
 - **Don't run the test suite, the build, or formatters.** Plan 18's
-  `@tester` covers that. For MVP we just make the edit; `@ci`
-  commits whatever you produced.
+  `@tester` covers that.
+- **Do NOT run `git commit`.** Make file edits only. The `@ci`
+  stage owns the implementation commit and writes its own
+  attribution into the commit message. If you commit yourself, the
+  commit author will be the operator's local git identity instead
+  of `Symphony Agent`, and `@ci` will see a clean working tree and
+  potentially skip its own commit step. Staging (`git add`) is
+  unnecessary too — `@ci` runs `git add -A` itself.
 
 If the file already contains what the issue is asking for (e.g.
 README already has the requested string), that is a **no-op
