@@ -36,4 +36,5 @@ Filenames are `NNNN-kebab-case-summary.md`, four-digit zero-padded.
 | [0011](0011-agent-in-pod-and-execution-backend.md)              | Agent runs inside the per-task pod; ExecutionBackend is the seam                                               | Superseded by 0014 |
 | [0012](0012-namespace-as-production-execution-backend.md)       | Namespace as the v1 production ExecutionBackend                                                                | Superseded by 0014 |
 | [0013](0013-daemon-pod-transport-broker-vs-controller.md)       | Daemon ↔ pod transport: pull-from-broker vs push-from-daemon                                                   | Superseded by 0014 |
-| [0014](0014-sub-agent-pipeline-supersedes-execution-backend.md) | Sub-agent pipeline + skill-driven provisioning supersedes ExecutionBackend, agent-in-pod, and broker transport | Proposed           |
+| [0014](0014-sub-agent-pipeline-supersedes-execution-backend.md) | Sub-agent pipeline + skill-driven provisioning supersedes ExecutionBackend, agent-in-pod, and broker transport | Accepted           |
+| [0015](0015-sub-agents-run-in-their-sandbox.md)                 | Sub-agents run in the sandbox they operate on; the parent stays in the daemon                                  | Proposed           |
