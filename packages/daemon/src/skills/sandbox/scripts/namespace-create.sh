@@ -16,9 +16,10 @@
 #     wrapper (`dispatch.sh`) at provision time, so SKILL.md updates
 #     ship with the daemon (not with an image rebuild).
 #
-# Validated 2026-05-17 against nsc v0.0.516. `imageRef` (not `image`)
-# is the load-bearing field name discovered during the smoke probe —
-# `image` is silently dropped by the API.
+# Validated 2026-05-17 against nsc v0.0.516. Note: the API field
+# is `imageRef` (camelCase) — `image` is accepted by the request
+# parser but never consumed, leading to a confusing "invalid
+# reference format" from containerd at pull time.
 #
 # Inputs (env vars set by the parent agent at @sandbox dispatch time):
 #   SYMPHONY_REPO_URL        — Git repo URL to clone inside the agent
@@ -88,9 +89,6 @@ TOKEN_FILE="$(mktemp -t symphony-nsc-token.XXXXXX)"
 SKILLS_TAR=""
 REQ_FILE=""
 cleanup() {
-  # rm -f each tmp file ONLY if its variable is non-empty; the
-  # `:-/dev/null` default is wrong because /dev/null isn't rm-able
-  # ("Operation not permitted").
   [ -n "$TOKEN_FILE" ] && rm -f "$TOKEN_FILE"
   [ -n "$SKILLS_TAR" ] && rm -f "$SKILLS_TAR"
   [ -n "$REQ_FILE" ] && rm -f "$REQ_FILE"
@@ -151,16 +149,11 @@ log "agent container reachable"
 
 # 4) Clone the target repo INSIDE the agent container.
 #
-# Important: `nsc ssh --container_name` does NOT pass commands
-# through a shell — it splits the command string on whitespace and
-# exec's argv[0] directly via the container runtime. So we can't
-# inline a multi-statement script; the kernel exec would fail with
-# `exec: "set": executable file not found` on the first word. Fix:
-# upload a helper script (`clone-and-checkout.sh`) and exec it by
-# absolute path with three positional args. Each arg is its own
-# argv slot — no shell parsing involved.
-#
-# Discovered during the EDU-22 smoke (2026-05-17).
+# `nsc ssh --container_name` does NOT pass the command through a
+# shell — it splits on whitespace and execs argv[0] directly. We
+# can't inline a multi-statement script. Upload `clone-and-checkout.sh`
+# and exec it by absolute path with three positional args; each arg
+# is its own argv slot.
 log "uploading clone-and-checkout helper"
 CLONE_SCRIPT_PATH="$SCRIPT_DIR/in-vm/clone-and-checkout.sh"
 [ -f "$CLONE_SCRIPT_PATH" ] || die "clone helper missing: $CLONE_SCRIPT_PATH"
@@ -208,10 +201,9 @@ nsc instance upload "$INSTANCE_ID" --container_name agent \
 
 log "symphony bundle ready (skills + dispatch.sh; creds from vault)"
 
-# Emit the SandboxHandle. `exec.template` now routes through the
-# container, not the host: every {cmd} runs inside the agent
-# container where claude/git/gh are installed and credentials are
-# in env.
+# Emit the SandboxHandle. `exec.template` routes through the agent
+# container (not the host): every {cmd} runs where claude/git/gh
+# are installed and the vault-injected credentials are in env.
 cat <<JSON
 {
   "id": "$INSTANCE_ID",

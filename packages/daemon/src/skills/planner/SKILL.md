@@ -13,10 +13,8 @@ skipped and let `@coder` work directly off the issue description.
 > `Glob`, `Read`, `Bash` — must be against an absolute path that
 > starts with the `worktree_path` you were given in the inputs. If
 > a path you're about to use does NOT start with `worktree_path/`,
-> stop and reconsider. Failure mode caught in the Plan 20 smoke
-> (EDU-18, 2026-05-17): the planner wrote the plan to the daemon's
-> source repo because it used a relative path that resolved against
-> the daemon's cwd. Don't repeat that.
+> stop and reconsider. Relative paths resolve against the daemon's
+> cwd — never use them.
 
 > **MVP scope.** Plan 20's first cut. Decision heuristic is "is this
 > non-trivial?" — agent judgment, not a strict rule. Curator and

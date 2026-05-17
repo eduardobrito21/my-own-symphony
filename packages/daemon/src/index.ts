@@ -5,9 +5,10 @@
 // cleanup, and starts the polling loop. SIGINT/SIGTERM trigger a
 // graceful shutdown.
 //
-// Plan 16: the sub-agent pipeline is now wired. The PipelineAgentRunner
-// orchestrates @sandbox → @coder stages via the Claude Agent SDK
-// running in the daemon process.
+// The PipelineAgentRunner orchestrates the @sandbox → @planner →
+// @coder → @ci stages via the Claude Agent SDK running in the daemon
+// process (or, for namespace-backed sandboxes, by Bash-dispatching
+// `claude -p` inside the agent container — see Plan 18b).
 //
 // Usage:
 //   symphony                          # ./symphony.yaml
