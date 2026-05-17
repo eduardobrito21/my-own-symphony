@@ -1,16 +1,18 @@
 # Plan 13 — Deployable services + v1 polish
 
-- **Status:** 🟡 Drafted, reshape pending — see ADR 0012 +
-  Plan 14. The original plan was sized for "containerize the
-  daemon so it can run alongside its in-pod containers, with
-  the docker-socket-mount complexity that implies." With ADR
-  0012 making Namespace the v1 production backend, the daemon
-  no longer needs Docker access on its host — it talks to
-  Namespace's API. The deploy story collapses to "run the
-  daemon as a Node process" (laptop, Fly.io machine, small
-  EC2 — operator's choice). Most of the original Stage 13a-c
-  work is replaced or deleted. Defer the rewrite of this plan
-  until Plan 14 ships and we know exactly what's left.
+- **Status:** 🔴 Superseded by Plan 15
+- **Supersession note (2026-05-17):** ADR 0014 collapses this
+  plan's premise. Without an `ExecutionBackend`, an
+  agent-runtime package, or in-pod containers, there is nothing
+  to containerize on the daemon side beyond the daemon itself —
+  and the daemon "deployment" reduces to "run a Node process."
+  No docker-socket mount, no three-service compose, no
+  sibling-container topology, no Unix-domain-socket split between
+  daemon and api. The whole 13a-13e work is dead.
+- **What survives into the post-ADR-0014 world:** the README
+  polish / doc consistency / tech-debt sweep ideas (Stage 13f)
+  are reusable — they're orthogonal to the architecture. They'll
+  fold into Plan 16's tail-end polish, not this plan.
 - **Replaces:** the original Plan 09 (Docker + polish), reshaped
   to follow the agent-in-pod model. With the agent runtime
   containerized (Plan 10), idempotent side effects (Plan 11),

@@ -1,9 +1,26 @@
 # Plan 14 — Namespace ExecutionBackend
 
-- **Status:** 📝 Drafted
+- **Status:** 🔴 Superseded by Plan 15 (the kill); replaced by future Plan 16
 - **New plan.** Created 2026-04-30 after the design discussion
   that produced ADR 0012 (Namespace as the v1 production
   ExecutionBackend).
+
+> **Supersession note (2026-05-17):** ADR 0014 supersedes the
+> `ExecutionBackend` abstraction itself. There is no Symphony-side
+> backend to implement, namespace or otherwise — the agent's
+> `@infra` skill provisions whatever environment a dispatch needs.
+> Plan 15 deletes this plan's target code. A future Plan 16 will
+> add the skill bundles + sub-agent pipeline that replace it.
+>
+> The `plan14-namespace-backend` branch stays as **reference
+> code**. The `Compute.Instance` plumbing in `sdk-runner.ts`
+> ports forward into the future `@infra` skill (as a shell
+> wrapper around `nsc` / the Namespace SDK), so the work isn't
+> zero-recovery.
+>
+> The earlier (2026-05-03) note about ADR 0013 is obsolete —
+> 0013 is itself superseded by 0014. There is no transport to
+> design.
 - **Spec sections:** none directly (this is an additional
   backend behind ADR 0011's seam).
 - **Layers touched:** new

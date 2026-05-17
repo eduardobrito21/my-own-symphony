@@ -1,6 +1,22 @@
 # Plan 12 — End-to-end real PR demo + Symphony self-hosting
 
-- **Status:** 📝 Drafted
+- **Status:** 🟡 Partial supersede by Plan 15; pipeline-pending-Plan-16
+- **Supersession note (2026-05-17):** the high-level goal — a
+  real Linear issue triggers a real PR on a real GitHub repo,
+  end-to-end — survives ADR 0014. What changes:
+  - Every verification scenario tied to pod lifecycle
+    (daemon-restart-mid-run as currently written; host-has-no-pnpm
+    audit; sibling-container topology) needs rewriting once Plan
+    16 ships the sub-agent pipeline. The new equivalents are:
+    "daemon-restart-mid-run: confirm idempotent re-dispatch
+    spawns a fresh initial agent; the prior dispatch's sandbox
+    auto-expires per @infra skill's deadline." No socket
+    reattach, no pod-keeps-running-without-daemon scenario.
+  - The `LocalDockerBackend` smoke from Plan 10 referenced as a
+    no-regression target is dead; replaced by "in-process agent
+    + @infra-spun sandbox" smoke under Plan 16.
+- This plan stays `active/` because the **goal** stands; the
+  **how** gets rewritten after Plan 16 lands.
 - **Extracted from:** original Plan 09 stage 09f. Split out
   because the live-fire test against real Linear + real GitHub
   is operational work distinct from the code work in Plans 10
@@ -13,7 +29,9 @@
   with Symphony as one of the projects, scripts under `scripts/`
   for smoke setup.
 - **ADRs referenced:** 0009 (multi-project), 0011 (agent-in-pod
-  and ExecutionBackend).
+  and ExecutionBackend; transport sections superseded by 0013),
+  0013 (daemon ↔ pod transport — strengthens the daemon-restart
+  verification scenario, see Stage 13d step 9).
 - **Comes AFTER:** Plans 09, 11, 12. All three are prerequisites
   — Plan 09 ships multi-project + ExecutionBackend; Plan 10
   ships the pod runtime; Plan 11 ships idempotency that this
@@ -40,10 +58,16 @@ PR on a real GitHub repo, end-to-end, with Symphony self-hosting:
    - Linear comment lands with the PR URL.
    - Linear issue transitions per the workflow.
    - **Daemon-restart-mid-run**: kill the daemon mid-turn;
-     restart. The daemon's next poll sees `In Progress`,
-     leaves the still-running pod alone, the pod completes,
-     terminal state lands. (This is what ADR 0011's
-     pod-fetches handshake makes trivially safe.)
+     restart. The daemon's next poll sees `In Progress` and
+     leaves the still-running pod alone; the pod completes
+     and terminal state lands. (Today this is what ADR 0011's
+     pod-fetches handshake makes trivially safe — the daemon
+     loses the event stream but the Linear state machine is
+     the source of truth. Once ADR 0013's broker transport
+     ships in Plan 15, the verification gets stronger: the
+     daemon resumes the event stream from the broker's last
+     ack offset and follows the pod to completion in real
+     time, not just at the next poll boundary.)
    - **Idempotency**: cancel + re-trigger the same issue.
      Result: same PR URL pushed-to, no duplicate comments.
    - **Host has no `pnpm`**: `which pnpm` empty on the host
@@ -215,13 +239,19 @@ Pod exits → daemon stops + cleans up
    - Wait for the pod to keep running (`docker ps` still
      shows it).
    - Restart the daemon.
-   - Verify: the daemon's next poll sees `In Progress`, does
-     NOT re-dispatch, leaves the pod alone. The pod completes,
-     emits its terminal Linear transition. The next-after-
-     completion poll picks up the now-`Done` state and
-     archives the run.
-   - This is the ADR 0011 dispatch-handshake guarantee in
-     action. Capture in decision log.
+   - Verify (today, ADR 0011 transport): the daemon's next
+     poll sees `In Progress`, does NOT re-dispatch, leaves
+     the pod alone. The pod completes, emits its terminal
+     Linear transition. The next-after-completion poll picks
+     up the now-`Done` state and archives the run. This is
+     the ADR 0011 dispatch-handshake guarantee in action.
+   - Verify (after Plan 15 ships ADR 0013's broker transport):
+     additionally, the restarted daemon **resumes the event
+     stream from the broker** at the last-acked offset and
+     follows the pod's remaining events in real time — not
+     just at the next poll boundary. The event timeline in
+     the dashboard shows no gap.
+   - Capture in decision log.
 
 10. **Idempotency re-trigger**:
     - After a smoke completes, manually transition the Linear

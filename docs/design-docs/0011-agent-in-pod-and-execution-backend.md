@@ -1,7 +1,20 @@
 # 0011 — Agent runs inside the per-task pod; ExecutionBackend is the seam
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR 0014
 - **Date:** 2026-04-30
+
+> **Supersession note (2026-05-17):** ADR 0014 replaces this ADR
+> in full. The agent no longer runs inside a per-task pod; it runs
+> in the daemon's process via the Claude Agent SDK, and the
+> environments the agent needs (sandboxes, services) are
+> provisioned by the agent itself via skills. The
+> `ExecutionBackend` interface is deleted. See ADR 0014 for the
+> full rationale and Plan 15 for the subtraction.
+>
+> The earlier (2026-05-03) note flagging "transport sections
+> superseded by ADR 0013" is itself obsolete — ADR 0013 is also
+> superseded by 0014 because the transport problem dissolves when
+> the agent runs in-process.
 
 ## Context
 
