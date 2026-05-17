@@ -1,40 +1,26 @@
 # Plan 14 — Namespace ExecutionBackend
 
-- **Status:** 🔴 Superseded by ADR 0013; pending Plan 15
+- **Status:** 🔴 Superseded by Plan 15 (the kill); replaced by future Plan 16
 - **New plan.** Created 2026-04-30 after the design discussion
   that produced ADR 0012 (Namespace as the v1 production
   ExecutionBackend).
 
-> **Supersession note (2026-05-03):** ADR 0013 reshapes the
-> daemon ↔ pod transport this plan was built around. Concretely,
-> the following parts of this plan are now wrong:
+> **Supersession note (2026-05-17):** ADR 0014 supersedes the
+> `ExecutionBackend` abstraction itself. There is no Symphony-side
+> backend to implement, namespace or otherwise — the agent's
+> `@infra` skill provisions whatever environment a dispatch needs.
+> Plan 15 deletes this plan's target code. A future Plan 16 will
+> add the skill bundles + sub-agent pipeline that replace it.
 >
-> - **Stage 14b** (envelope-via-env-var, stdout-as-event-channel)
->   — under ADR 0013, the pod pulls its envelope from a broker
->   and publishes events to the broker. No envelope env var, no
->   stdout JSON-line parsing.
-> - **Stage 14c step 7's "streaming `runCommand` for the agent
->   process"** — no longer needed; the agent talks to the broker
->   directly, the daemon is not an exec proxy.
-> - **`event-stream.ts`** in the existing implementation on the
->   `plan14-namespace-backend` branch — throwaway under either
->   ADR 0013 pattern.
+> The `plan14-namespace-backend` branch stays as **reference
+> code**. The `Compute.Instance` plumbing in `sdk-runner.ts`
+> ports forward into the future `@infra` skill (as a shell
+> wrapper around `nsc` / the Namespace SDK), so the work isn't
+> zero-recovery.
 >
-> What survives + folds into Plan 15:
->
-> - The `Compute.Instance` plumbing in `sdk-runner.ts` (now the
->   correct primitive — DevBox-vs-Instance is settled by ADR 0013
->   in favor of Instance).
-> - Backend lifecycle shape (`createInstance`, `waitInstance`,
->   `destroyInstance` with `deadline` for leak-bounded cleanup).
-> - Agent-runtime tarball staging (Stage 14a / Stage 14c step 9)
->   — orthogonal to transport.
-> - Composition-root config wiring (Stage 14d) — orthogonal to
->   transport.
->
-> Plan 15 will be drafted once the A-vs-B choice in ADR 0013 is
-> made. The `plan14-namespace-backend` branch stays as reference
-> code; do not extend it further.
+> The earlier (2026-05-03) note about ADR 0013 is obsolete —
+> 0013 is itself superseded by 0014. There is no transport to
+> design.
 - **Spec sections:** none directly (this is an additional
   backend behind ADR 0011's seam).
 - **Layers touched:** new

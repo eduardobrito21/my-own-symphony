@@ -1,12 +1,23 @@
 # 0013 — Daemon ↔ pod transport: pull-from-broker vs push-from-daemon
 
-- **Status:** Proposed
+- **Status:** Superseded by ADR 0014
 - **Date:** 2026-05-03
 - **Relates to:** Supersedes parts of ADR 0011 (the per-pod
   reverse-TCP socket and file-mounted dispatch envelope) and
   reshapes parts of ADR 0012 (the choice between Namespace's
   `Compute.Instance` and `DevBoxService` as the underlying
   primitive). Reshapes Plan 14.
+
+> **Supersession note (2026-05-17):** ADR 0014 supersedes this ADR
+> entirely. The daemon ↔ pod transport question — which this ADR
+> framed as a choice between an HTTP control-plane on the daemon
+> (Pattern A) and a hosted Redis broker (Pattern B) — **dissolves
+> because there is no daemon ↔ pod transport**. Under ADR 0014 the
+> agent runs in the daemon's process via the Claude Agent SDK; the
+> things that run remotely (sandboxes, services) are addressed by
+> the agent's `@infra` skill via its own remote-exec tools, not by
+> a Symphony transport layer. The A-vs-B choice this ADR deferred
+> is moot. See ADR 0014 + Plan 15.
 
 ## Context
 

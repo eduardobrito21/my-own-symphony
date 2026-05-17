@@ -1,6 +1,6 @@
 # 0012 — Namespace as the v1 production ExecutionBackend
 
-- **Status:** Proposed (implementation transport reshaped by ADR 0013)
+- **Status:** Superseded by ADR 0014
 - **Date:** 2026-04-30
 - **Relates to:** Evolves ADR 0011's "v1 ships exactly one impl
   (`LocalDockerBackend`)" framing. The `ExecutionBackend` seam,
@@ -8,24 +8,18 @@
   unchanged — this ADR adds a second backend and renames which
   one is "production."
 
-> **Reshape note (2026-05-03):** ADR 0013 reshapes the
-> implementation transport this ADR sketches. Specifically:
+> **Supersession note (2026-05-17):** ADR 0014 replaces this ADR
+> in full. The choice of platform (Namespace, local docker, E2B,
+> BTG-internal) is no longer Symphony's call — the agent's
+> `@infra` skill picks per dispatch. The `Compute.Instance`
+> plumbing built on the `plan14-namespace-backend` branch is not
+> wasted: it ports into the future `@infra` skill as a shell
+> wrapper around `nsc` or the Namespace SDK. The branch stays as
+> reference. See ADR 0014 + Plan 15.
 >
-> - This ADR's "use `Compute.createInstance` with a `containers`
->   array + server-streaming `RunCommand` + envelope-via-env-var"
->   pattern is replaced by a broker-based pull model (pod pulls
->   envelope from a broker, publishes events to the same broker).
-> - The DevBox-vs-Instance question that surfaced after this ADR
->   was written is **answered: `Compute.Instance`** — once the
->   daemon no longer needs a streaming exec channel into the pod,
->   Instance's first-class `deadline` field is sufficient.
-> - The higher-level decision recorded here — **Namespace as the
->   v1 production target** — stands. Only the implementation
->   plumbing changes.
->
-> Plan 14 (the implementation of this ADR) is paused pending the
-> A-vs-B choice in ADR 0013. See ADR 0013 for the full transport
-> decision and the comparison table.
+> The earlier (2026-05-03) note about ADR 0013 reshaping the
+> implementation transport is also obsolete; 0013 is itself
+> superseded by 0014.
 
 ## Context
 

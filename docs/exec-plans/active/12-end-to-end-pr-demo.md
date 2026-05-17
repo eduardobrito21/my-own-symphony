@@ -1,6 +1,22 @@
 # Plan 12 — End-to-end real PR demo + Symphony self-hosting
 
-- **Status:** 📝 Drafted
+- **Status:** 🟡 Partial supersede by Plan 15; pipeline-pending-Plan-16
+- **Supersession note (2026-05-17):** the high-level goal — a
+  real Linear issue triggers a real PR on a real GitHub repo,
+  end-to-end — survives ADR 0014. What changes:
+  - Every verification scenario tied to pod lifecycle
+    (daemon-restart-mid-run as currently written; host-has-no-pnpm
+    audit; sibling-container topology) needs rewriting once Plan
+    16 ships the sub-agent pipeline. The new equivalents are:
+    "daemon-restart-mid-run: confirm idempotent re-dispatch
+    spawns a fresh initial agent; the prior dispatch's sandbox
+    auto-expires per @infra skill's deadline." No socket
+    reattach, no pod-keeps-running-without-daemon scenario.
+  - The `LocalDockerBackend` smoke from Plan 10 referenced as a
+    no-regression target is dead; replaced by "in-process agent
+    + @infra-spun sandbox" smoke under Plan 16.
+- This plan stays `active/` because the **goal** stands; the
+  **how** gets rewritten after Plan 16 lands.
 - **Extracted from:** original Plan 09 stage 09f. Split out
   because the live-fire test against real Linear + real GitHub
   is operational work distinct from the code work in Plans 10
