@@ -1,6 +1,6 @@
 # Plan 15 — Subtract to the sub-agent pipeline
 
-- **Status:** 📝 Drafted (the kill list)
+- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** ADR 0014 (sub-agent pipeline + skill-driven
   provisioning supersedes ExecutionBackend, agent-in-pod, and
   broker transport).
@@ -416,4 +416,25 @@ test` should pass (with the `.skip`'d tests). Anything else
 
 ## Decision log
 
-(empty — populated as the plan executes)
+### 2026-05-17 — Plan 15 complete
+
+Commit `7044ddc` executed the full kill list. Net: 5,079 lines removed
+across 54 files. Deletions verified:
+
+- `packages/agent-runtime/` — deleted (whole package, 7 files)
+- `packages/daemon/src/execution/` — deleted (whole subtree, 11 files)
+- `packages/daemon/src/agent/backend/` — deleted (BackendAgentRunner)
+- `packages/daemon/src/workspace/container.ts`, `hooks.ts`, `hooks.test.ts` — deleted
+- `docker/` — deleted (agent-base.Dockerfile + README)
+- `docker:build:agent-base` script — removed from root package.json
+
+Re-roles verified:
+
+- `packages/daemon/src/index.ts` — `NoopAgentRunner` stub in place
+- `packages/daemon/src/workspace/manager.ts` — hook subsystem removed
+- `packages/daemon/src/config/deployment.ts` — `ExecutionConfig` dropped
+- `README.md`, `ARCHITECTURE.md`, `SECURITY.md`, `RELIABILITY.md` — banners added
+- ADRs 0011/0012/0013 — status flipped to "Superseded by ADR 0014"
+
+Checks: `pnpm typecheck && pnpm lint && pnpm deps:check && pnpm test`
+all clean (313 tests pass, 1 skipped with Plan 16 marker).
