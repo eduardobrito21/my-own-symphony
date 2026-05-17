@@ -1,11 +1,11 @@
 # Architecture
 
-> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
-> describes the pre-pivot architecture (daemon + agent-runtime
-> package, `ExecutionBackend` seam, per-pod isolation). ADR 0014
-> replaces it with a sub-agent pipeline + skill-driven provisioning.
-> Plan 15 deletes the dead code (this commit); Plan 16 will rewrite
-> this document. Read below as historical context until then.
+> **Updated for Plan 16 (2026-05-17).** The sub-agent pipeline is now
+> wired. The daemon runs the Claude Agent SDK in-process, orchestrating
+> skills (@sandbox, @coder) to provision dev environments and make code
+> changes. ADR 0014 describes the architecture; Plan 15 deleted the
+> old ExecutionBackend/agent-runtime code; Plan 16 implemented the
+> replacement.
 
 This document is the map. It defines the layers, the allowed dependencies
 between them, and where to put new code.
@@ -33,15 +33,12 @@ Source code is organized as a pnpm monorepo:
 ```
 packages/
 ├── types/           # shared types between daemon and dashboard
-├── daemon/          # the orchestrator process
-├── agent-runtime/   # the in-pod entrypoint (Plan 10) — runs INSIDE per-issue Docker pods
+├── daemon/          # the orchestrator + agent process
 └── dashboard/       # the Next.js UI process
 ```
 
 `types/` exists so that the dashboard can render daemon state with the same
-type safety the daemon uses to produce it. `agent-runtime/` ships into the
-`symphony/agent-base:1` Docker image; the daemon never imports it at runtime
-(only the docker tag is referenced).
+type safety the daemon uses to produce it.
 
 ## The daemon's internal layers
 
@@ -54,11 +51,11 @@ layer to a lower layer** (or to `observability/`, which is cross-cutting).
           ↓
         config
           ↓
-   ┌──────┼──────┬──────────┐
-   ↓      ↓      ↓          ↓
-tracker  workspace  agent  execution   ← all may use types & config
-   └──────┴──────┴──────────┘
-          ↓                  ↑ agent depends on execution (BackendAgentRunner adapter)
+   ┌──────┼──────┬────────┐
+   ↓      ↓      ↓        ↓
+tracker  workspace  agent  skills   ← all may use types & config
+   └──────┴──────┴────────┘
+          ↓
      orchestrator
           ↓
          http
@@ -68,26 +65,28 @@ tracker  workspace  agent  execution   ← all may use types & config
   observability/  ← cross-cutting; any layer may emit logs/metrics
 ```
 
-`execution/` (Plan 10 / ADR 0011) defines the `ExecutionBackend` interface
-and ships two impls: `FakeBackend` (in-memory, for tests + dry runs) and
-`LocalDockerBackend` (the v1 production backend that starts per-issue
-Docker pods running `@symphony/agent-runtime`'s entrypoint). It depends
-only on `agent/` (for the `AgentEvent` shape it streams), `config/`, and
-`types/`.
+The `agent/` layer now contains:
+
+- `agent/claude/` — Claude Agent SDK wrapper (from Plan 07)
+- `agent/pipeline/` — PipelineAgentRunner that orchestrates skills (Plan 16)
+- `agent/skills/` — skill loader and output schemas (Plan 16)
+
+The `skills/` directory at `packages/daemon/src/skills/` contains bundled
+default skill definitions (SKILL.md files) that the agent loads at runtime.
 
 ### Layer responsibilities
 
-| Layer            | Purpose                                                                                                                                        | May depend on                                      |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| `types/`         | Branded IDs, domain entities (`Issue`, `Workspace`, `Session`, `OrchestratorState`). Pure types, zero runtime.                                 | nothing                                            |
-| `config/`        | `symphony.yaml` deployment loader + per-repo `workflow.md` schema, zod schemas, `$VAR` and `~` resolution, typed errors.                       | `types`                                            |
-| `tracker/`       | Issue tracker adapter interface + Linear/Fake implementations. Fetches and normalizes; never decides what to do with the data.                 | `types`, `config`                                  |
-| `workspace/`     | Per-issue workspace lifecycle, hook execution, path safety invariants.                                                                         | `types`, `config`                                  |
-| `agent/`         | Claude Agent SDK wrapper, prompt rendering, custom tools (e.g. `linear_graphql`), event normalization, `BackendAgentRunner` adapter (Plan 10). | `types`, `config`, `workspace`, `execution`        |
-| `execution/`     | `ExecutionBackend` interface (ADR 0011), `FakeBackend`, `LocalDockerBackend` (Plan 10 — image resolution, Unix-socket event protocol).         | `types`, `config`, `agent`                         |
-| `orchestrator/`  | Polling loop, single-authority state machine, dispatch, retries, reconciliation, dynamic reload.                                               | `types`, `config`, `tracker`, `workspace`, `agent` |
-| `http/`          | Fastify routes for `/api/v1/*`. Adapts orchestrator state to HTTP.                                                                             | `types`, `orchestrator`, `observability`           |
-| `observability/` | `pino` logger, structured event emission, snapshot helpers.                                                                                    | `types`                                            |
+| Layer            | Purpose                                                                                                             | May depend on                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `types/`         | Branded IDs, domain entities (`Issue`, `Workspace`, `Session`, `OrchestratorState`). Pure types, zero runtime.      | nothing                                            |
+| `config/`        | `symphony.yaml` deployment loader + per-repo `workflow.md` schema, zod schemas, `$VAR` and `~` resolution.          | `types`                                            |
+| `tracker/`       | Issue tracker adapter interface + Linear/Fake implementations. Fetches and normalizes; never decides what to do.    | `types`, `config`                                  |
+| `workspace/`     | Per-issue workspace lifecycle, path safety invariants.                                                              | `types`, `config`                                  |
+| `agent/`         | Claude Agent SDK wrapper, pipeline orchestration, skill loading, prompt rendering, custom tools (`linear_graphql`). | `types`, `config`, `workspace`                     |
+| `skills/`        | Bundled default skill definitions (SKILL.md files) loaded by the agent at runtime.                                  | nothing (markdown files, not TypeScript)           |
+| `orchestrator/`  | Polling loop, single-authority state machine, dispatch, retries, reconciliation, dynamic reload.                    | `types`, `config`, `tracker`, `workspace`, `agent` |
+| `http/`          | Fastify routes for `/api/v1/*`. Adapts orchestrator state to HTTP.                                                  | `types`, `orchestrator`, `observability`           |
+| `observability/` | `pino` logger, structured event emission, snapshot helpers.                                                         | `types`                                            |
 
 ### Why this direction
 
@@ -120,12 +119,14 @@ is cross-cutting. To prevent this from becoming an accidental dumping ground:
 implementations together. It:
 
 1. Loads `symphony.yaml` via `config/deployment-loader.ts`.
-2. Constructs one `LinearTracker` per project entry, sharing one `LinearClient`.
-3. Picks an `AgentRunner` per `execution.backend` (`local-docker` →
-   `BackendAgentRunner` wrapping `LocalDockerBackend`; `in-process` →
-   `ClaudeAgent` directly).
-4. Constructs the `Orchestrator` with all collaborators.
-5. Starts the optional HTTP server (gated on `SYMPHONY_HTTP_PORT`).
+2. Validates required env vars (`LINEAR_API_KEY`, `ANTHROPIC_API_KEY`).
+3. Constructs one `LinearTracker` per project entry, sharing one `LinearClient`.
+4. Constructs `PipelineAgentRunner` with project dispatch info (repo URLs, branches).
+5. Constructs the `Orchestrator` with all collaborators.
+6. Starts the optional HTTP server (gated on `SYMPHONY_HTTP_PORT`).
+
+The `PipelineAgentRunner` orchestrates the skill pipeline (@sandbox → @coder)
+using the Claude Agent SDK running in the daemon process.
 
 If you find yourself wiring two concrete implementations together inside a
 domain layer, stop — that wiring belongs in `index.ts`.
@@ -135,15 +136,14 @@ domain layer, stop — that wiring belongs in `index.ts`.
 Every value crossing a boundary must be parsed with `zod` before it enters the
 typed core:
 
-| Boundary                                   | Parser                                        |
-| ------------------------------------------ | --------------------------------------------- |
-| `symphony.yaml` (operator-side)            | `config/deployment.ts`                        |
-| `<repo>/.symphony/workflow.md` (repo-side) | `config/repo-workflow.ts` (parsed in the pod) |
-| `/etc/symphony/dispatch.json` (in-pod)     | `agent-runtime/src/dispatch-envelope.ts`      |
-| Daemon ↔ pod event socket lines            | `execution/local-docker/socket-server.ts`     |
-| Linear GraphQL responses                   | `tracker/linear/responses.ts`                 |
-| HTTP request bodies / query params         | `http/schemas.ts`                             |
-| Claude Agent SDK events                    | `agent/claude/event-mapping.ts`               |
+| Boundary                                   | Parser                          |
+| ------------------------------------------ | ------------------------------- |
+| `symphony.yaml` (operator-side)            | `config/deployment.ts`          |
+| `<repo>/.symphony/workflow.md` (repo-side) | `config/repo-workflow.ts`       |
+| Linear GraphQL responses                   | `tracker/linear/responses.ts`   |
+| HTTP request bodies / query params         | `http/schemas.ts`               |
+| Claude Agent SDK events                    | `agent/claude/event-mapping.ts` |
+| Skill outputs (SandboxHandle, CoderResult) | `agent/skills/schemas.ts`       |
 
 Inside the typed core, values are trusted. Outside it, nothing is.
 

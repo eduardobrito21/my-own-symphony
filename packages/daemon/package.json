@@ -55,7 +55,7 @@
   ],
   "scripts": {
     "build": "tsc --build tsconfig.build.json && pnpm run postbuild",
-    "postbuild": "mkdir -p dist/agent/claude && cp src/agent/claude/linear-skill.md dist/agent/claude/linear-skill.md",
+    "postbuild": "mkdir -p dist/agent/claude && cp src/agent/claude/linear-skill.md dist/agent/claude/linear-skill.md && mkdir -p dist/skills && cp -R src/skills/. dist/skills/",
     "clean": "tsc --build tsconfig.build.json --clean && rm -rf dist",
     "dev": "tsx src/index.ts",
     "dev:watch": "tsx --watch src/index.ts",

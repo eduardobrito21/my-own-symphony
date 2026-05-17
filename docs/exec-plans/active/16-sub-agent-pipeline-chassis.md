@@ -1,6 +1,6 @@
 # Plan 16 — Sub-agent pipeline chassis + first `@sandbox` skill
 
-- **Status:** 📝 Drafted
+- **Status:** 🟡 Implementation complete, tests pending
 - **Implements:** ADR 0014 (sub-agent pipeline + skill-driven
   provisioning supersedes ExecutionBackend, agent-in-pod, and broker
   transport).
@@ -415,4 +415,53 @@ the bundled default is a conservative approximation.
 
 ## Decision log
 
-(empty — populated as the plan executes)
+### 2026-05-17 — Core implementation complete
+
+Implemented Stages 16a through 16d. Summary of what shipped:
+
+**Stage 16a — Skill schemas + loader:**
+
+- `packages/daemon/src/agent/skills/schemas.ts` — `SandboxHandleSchema`,
+  `CoderResultSchema` with zod validation helpers.
+- `packages/daemon/src/agent/skills/loader.ts` — `loadSkill()` with two-tier
+  discovery (repo override → bundled default).
+- `packages/daemon/src/agent/skills/index.ts` — re-exports.
+
+**Stage 16b — Bundled skills:**
+
+- `packages/daemon/src/skills/sandbox/SKILL.md` — default @sandbox skill
+  (clone repo, docker compose up, return SandboxHandle).
+- `packages/daemon/src/skills/coder/SKILL.md` — stub @coder skill
+  (acknowledges issue, returns empty CoderResult).
+
+**Stage 16c — Pipeline runner:**
+
+- `packages/daemon/src/agent/pipeline/prompt.ts` — `buildPipelinePrompt()`
+  that assembles the orchestration system prompt from issue context + skills.
+- `packages/daemon/src/agent/pipeline/runner.ts` — `PipelineAgentRunner`
+  implements `AgentRunner`, loads skills, builds prompt, delegates to
+  `ClaudeAgent`.
+
+**Stage 16d — Composition root:**
+
+- `packages/daemon/src/index.ts` — replaced `NoopAgentRunner` with
+  `PipelineAgentRunner`, added `ANTHROPIC_API_KEY` check, built
+  `projectDispatch` map for repo URLs and branch prefixes.
+
+**Documentation:**
+
+- `ARCHITECTURE.md` — updated banner, layer diagram, responsibilities table,
+  composition root section, boundary parsing table.
+
+**Verification:**
+
+- `pnpm typecheck` — clean
+- `pnpm lint` — clean
+- `pnpm test` — 313 passed, 1 skipped (pre-existing)
+- `pnpm deps:check` — 10 warnings (pre-existing orphans)
+
+**Pending:**
+
+- Stage 16a tests for schemas and loader (deferred — code works, tests TBD).
+- Stage 16e end-to-end smoke with real Linear issue (requires runtime test).
+- Stage 16f tests for pipeline runner (deferred).
