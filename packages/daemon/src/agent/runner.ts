@@ -30,6 +30,30 @@ export interface AgentRunInput {
   readonly workspacePath: string;
   /** Already-rendered prompt string (the workflow body for this issue). */
   readonly prompt: string;
+  /**
+   * The Linear issue's labels, lowercased per SPEC §11.3. Surfaced to
+   * the parent agent so the `@sandbox` dispatcher (Plan 17a) can pick
+   * a backend from `sandbox:<backend>` labels. MockAgent paths can
+   * ignore this field.
+   */
+  readonly labels: readonly string[];
+  /**
+   * The issue's title. Surfaced so the pipeline prompt can render it
+   * without `PipelineAgentRunner` re-fetching the issue from Linear.
+   * The orchestrator already has the full issue in hand.
+   */
+  readonly title: string;
+  /**
+   * The issue's description (body). The MVP @coder reads this to
+   * decide what change to make. `null` when the issue has no body.
+   */
+  readonly description: string | null;
+  /**
+   * The issue's URL (Linear or other tracker). Surfaced so the
+   * close-out + @ci stages can reference it in PR bodies / Linear
+   * comments.
+   */
+  readonly url: string | null;
   readonly attempt: number | null;
   /**
    * Optional cancellation signal. If aborted, the agent SHOULD

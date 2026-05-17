@@ -107,4 +107,50 @@ describe('findSandboxHandleInText', () => {
     const result = findSandboxHandleInText(text);
     expect(result.found).toBe(false);
   });
+
+  // Plan 17a — second backend ('namespace-devbox') exercising the
+  // contract on a non-docker `kind` discriminator. The schema
+  // intentionally keeps `kind` open-ended (z.string()), so a new
+  // backend doesn't require a schema change; downstream code is
+  // expected to switch on the value.
+
+  it('accepts a namespace-devbox handle with an nsc-shaped exec template', () => {
+    const namespaceHandle = {
+      id: 'h9am86n6gi25m',
+      kind: 'namespace-devbox',
+      worktree_path: '/workspace',
+      exec: {
+        kind: 'shell-template',
+        template: 'nsc ssh h9am86n6gi25m {cmd}',
+      },
+      teardown: {
+        kind: 'both',
+        script: 'nsc destroy h9am86n6gi25m',
+      },
+    };
+    const text = `\`\`\`json\n${JSON.stringify(namespaceHandle)}\n\`\`\``;
+    const result = findSandboxHandleInText(text);
+    expect(result.found).toBe(true);
+    if (!result.found) return;
+    expect(result.handle.kind).toBe('namespace-devbox');
+    expect(result.handle.id).toBe('h9am86n6gi25m');
+    expect(result.handle.exec.template).toContain('nsc ssh');
+    expect(result.handle.teardown.kind).toBe('both');
+    expect(result.handle.teardown.script).toBe('nsc destroy h9am86n6gi25m');
+  });
+
+  it('accepts an unknown kind string (schema is intentionally open-ended)', () => {
+    // Documents the contract from Plan 17a Decision 2: future backends
+    // can ship without a schema change. Validation must not gate on a
+    // closed enum of `kind` values.
+    const futureHandle = {
+      ...validHandle,
+      kind: 'aws-ec2', // not implemented in v1, but must still parse
+    };
+    const text = `\`\`\`json\n${JSON.stringify(futureHandle)}\n\`\`\``;
+    const result = findSandboxHandleInText(text);
+    expect(result.found).toBe(true);
+    if (!result.found) return;
+    expect(result.handle.kind).toBe('aws-ec2');
+  });
 });
