@@ -1,21 +1,16 @@
 # my-own-symphony
 
-> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
-> describes the pre-pivot architecture (per-pod agent runtime,
-> `ExecutionBackend` abstraction, `LocalDockerBackend`,
-> `agent-runtime` package). ADR 0014 replaces all of that with a
-> sub-agent pipeline + skill-driven provisioning. Plan 15 deletes the
-> dead code (this commit); Plan 16 will add the new architecture's
-> code and rewrite this README to describe it. Read the sections
-> below as historical context until then.
-
 A TypeScript reimplementation of [openai/symphony](https://github.com/openai/symphony),
 built harness-first using the [Claude Agent SDK](https://docs.anthropic.com/en/api/agent-sdk/overview).
 
-Symphony is a long-running daemon that polls an issue tracker (Linear), creates
-a per-issue workspace, and runs a coding agent inside it. This port follows the
-upstream language-agnostic specification while substituting the Claude Agent
-SDK for Codex's app-server.
+Symphony is a long-running daemon that polls Linear for eligible issues
+and dispatches each to a parent agent (running in the daemon's Node
+process via the Claude Agent SDK). The parent agent orchestrates a
+fixed pipeline of specialist sub-agents driven by markdown skill
+files (`@sandbox`, `@coder`, with `@app` / `@tester` / `@ci` planned)
+to provision a sandbox, make code changes, and close out the issue.
+This port follows the upstream language-agnostic specification while
+substituting the Claude Agent SDK for Codex's app-server.
 
 ## Status
 

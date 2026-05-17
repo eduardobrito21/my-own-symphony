@@ -1,125 +1,144 @@
 # Security
 
-> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
-> describes the pre-pivot trust model, which assumed an in-pod agent
-> reached via the daemon's reverse socket. ADR 0014 changes this: the
-> agent runs in the daemon's process; isolation moves to the
-> `@infra` skill's sandbox (provisioned per-dispatch) and the
-> agent's tool surface (no host Bash; all Bash routes through
-> `@infra`'s exec). Plan 15 deletes the dead code; Plan 16 will
-> rewrite this document with the post-pivot trust model. Read below
-> as historical context until then.
-
 This document describes Symphony's trust model, the secrets it handles, and
 the operational safety invariants enforced by the codebase.
 
-## Trust posture (this implementation)
+## Trust posture
 
-This implementation is intended for **trusted, single-operator environments**.
-That means:
+Symphony is intended for **trusted, single-operator environments**:
 
-- The operator owns the host machine, the Linear workspace, and any repository
-  the agent is asked to work on.
-- The operator's credentials (`LINEAR_API_KEY`, `ANTHROPIC_API_KEY`) authorize
-  full access to the resources scoped to those tokens.
-- The deployment file (`symphony.yaml`) and per-repo workflow files
-  (`<repo>/.symphony/workflow.md` — read by the in-pod agent runtime, not the
-  daemon) plus any embedded shell hooks are treated as trusted code. Do not
-  point Symphony at repos whose `.symphony/workflow.md` you would not run.
-- The Claude Agent SDK runs with the same filesystem and network privileges as
-  the daemon process.
+- The operator owns the host machine, the Linear workspace, and any
+  repository the agent is asked to work on.
+- The operator's credentials (`LINEAR_API_KEY`, `ANTHROPIC_API_KEY`,
+  optional `GITHUB_TOKEN`) authorize full access to the resources scoped
+  to those tokens.
+- Skill definitions — both the bundled defaults in
+  `packages/daemon/src/skills/<name>/SKILL.md` and per-repo overrides at
+  `<repo>/.symphony/skills/<name>/SKILL.md` — are treated as trusted code.
+  The parent agent reads each SKILL.md and executes its shell snippets
+  directly. Do not point Symphony at a repo whose skill overrides you
+  would not run.
+- `symphony.yaml` is operator-authored config and treated as trusted.
 
-This is the same posture as upstream Symphony's "high-trust" example. It is
-**not** suitable for multi-tenant deployment, untrusted issue input, or shared
-infrastructure without additional sandboxing layers (containers, VMs,
-network segmentation).
+This is **not** suitable for multi-tenant deployment, untrusted issue
+input, or shared infrastructure without additional sandboxing layers
+(containers, VMs, network segmentation).
+
+## Architecture-level isolation
+
+The parent agent runs **in the daemon's Node process** via the Claude
+Agent SDK. There is no per-issue pod, no separate runtime, no transport
+boundary. Isolation comes from three places, in order:
+
+1. **Tool surface.** The SDK is configured with an explicit, narrow
+   tool allowlist (see "Agent tool surface" below). Tools not in the
+   allowlist cannot be invoked, even if the model attempts to.
+2. **Per-issue workspace.** Each dispatch gets its own workspace
+   directory under `workspace.root`. The agent's `cwd` is set to that
+   directory; the `@sandbox` skill clones into it.
+3. **Linear scoping.** The `linear_graphql` MCP tool wraps the
+   operator's Linear credentials. The agent never sees raw tokens.
+
+Stronger isolation (routing the agent's Bash through a remote sandbox
+exec rather than the daemon host) is the goal of a future `@coder`
+skill iteration; today the parent agent has direct host Bash.
 
 ## Trust boundaries
 
-| Boundary                            | Direction     | Trust assumption                                                                                     |
-| ----------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
-| Operator → `symphony.yaml`          | Inbound       | Trusted: the file is local + operator-authored. Lists which repos to clone into pods.                |
-| Repo team → `.symphony/workflow.md` | Inbound       | Trusted within the repo's own pod. Each repo team owns prompt + hooks; bad content stays in its pod. |
-| Linear → `tracker/`                 | Inbound       | Untrusted shape; trusted operator. Parse with zod, don't echo into shell.                            |
-| Agent → `linear_graphql` tool       | Inbound       | Untrusted query content; validated to be a single GraphQL operation before send.                     |
-| Agent → workspace filesystem        | Bidirectional | Constrained: agent's `cwd` must be the per-issue workspace and may not escape it.                    |
-| Daemon → tracker / agent providers  | Outbound      | Trusted credentials; never log secrets.                                                              |
-| HTTP API consumers                  | Inbound       | Loopback-only by default. If exposed, treat all input as untrusted (zod-parse every body and query). |
+| Boundary                             | Direction     | Trust assumption                                                                                     |
+| ------------------------------------ | ------------- | ---------------------------------------------------------------------------------------------------- |
+| Operator → `symphony.yaml`           | Inbound       | Trusted. Local, operator-authored.                                                                   |
+| Repo team → `.symphony/skills/`      | Inbound       | Trusted. The agent executes any shell snippet the override prescribes.                               |
+| Linear → `tracker/`                  | Inbound       | Untrusted shape, trusted operator. Parse with zod, never echo into shell.                            |
+| Agent → `linear_graphql` tool        | Inbound       | Untrusted query content; validated to be a single GraphQL operation before send.                     |
+| Agent → workspace filesystem         | Bidirectional | Constrained: `cwd` is the per-issue workspace; path-containment is enforced before launch.           |
+| Agent → host Bash                    | Bidirectional | Trusted operator equivalence. The agent inherits the daemon's full filesystem/network privileges.    |
+| Daemon → Linear / Anthropic / GitHub | Outbound      | Trusted credentials; never log secrets.                                                              |
+| HTTP API consumers                   | Inbound       | Loopback-only by default. If exposed, treat all input as untrusted (zod-parse every body and query). |
 
 ## Secrets
 
-Symphony reads three credentials:
+Symphony reads three credentials, all from environment variables:
 
-- `LINEAR_API_KEY` — Linear personal API token. Used by the daemon's tracker
-  for polling and by the in-pod agent (eligibility check, dispatch handshake,
-  and the `linear_graphql` tool).
-- `ANTHROPIC_API_KEY` — used by the Claude Agent SDK in the pod.
-- `GITHUB_TOKEN` — optional. Required only for HTTPS clones of private repos
-  by the in-pod entrypoint. Plan 12 (PR loop) makes this required for all
-  dispatches.
+- `LINEAR_API_KEY` — Linear personal API token. Used by the daemon's
+  tracker for polling and by the agent's `linear_graphql` MCP tool.
+- `ANTHROPIC_API_KEY` — used by the Claude Agent SDK, which the daemon
+  invokes in-process.
+- `GITHUB_TOKEN` — optional. Required for HTTPS clones of private repos
+  by the `@sandbox` skill, and (in future) required for the `@ci`
+  skill's PR loop.
 
-Per Plan 10 / ADR 0011, all three flow into per-issue Docker pods as `-e`
-environment variables. The pod inherits the daemon's credentials wholesale;
-per-project credential isolation is a later concern.
+All three are inherited by the agent's process (the daemon's). Tool
+calls the agent makes — `Bash`, `Read`, `Write`, `Edit`, `Glob`,
+`Grep`, `linear_graphql` — see those env vars. Per-project credential
+isolation is not implemented.
 
 Rules:
 
-- Secrets are read from environment variables only. Never check secrets into
-  the repo or into `symphony.yaml` / `.symphony/workflow.md`.
-- `symphony.yaml` may reference `$VAR_NAME` to pull from the environment; the
-  config layer resolves these.
-- Validate presence of secrets without printing their values. The startup
-  preflight may say "LINEAR*API_KEY missing" but never "LINEAR_API_KEY = lin*…".
-- The `pino` logger has a `redact` config that masks token-shaped values; do
-  not bypass it.
+- Secrets are read from environment variables only. Never check secrets
+  into the repo or into `symphony.yaml` / skill files.
+- `symphony.yaml` may reference `$VAR_NAME` to pull from the
+  environment; the config layer resolves these.
+- Validate presence of secrets without printing their values. Startup
+  preflight may say "LINEAR*API_KEY missing" but never "LINEAR_API_KEY
+  = lin*…".
+- The `pino` logger has a `redact` config that masks token-shaped
+  values; do not bypass it.
 
 ## Filesystem invariants
 
-These invariants are enforced in code in `workspace/` and tested:
+Enforced in code (`workspace/`) and tested:
 
-1. **Workspace path containment.** Every workspace path must resolve to an
-   absolute path that has the configured `workspace.root` as a prefix. Paths
-   outside the root are rejected before agent launch.
+1. **Workspace path containment.** Every workspace path must resolve
+   to an absolute path with `workspace.root` as a prefix. Paths outside
+   the root are rejected before agent launch.
 2. **Sanitized identifiers.** Workspace directory names use only
-   `[A-Za-z0-9._-]`. All other characters in the issue identifier are replaced
-   with `_`.
-3. **Agent cwd matches the workspace.** Before launching the agent for an
-   issue, the runner asserts `cwd === workspacePath`. Any mismatch fails the
+   `[A-Za-z0-9._-]`. All other characters in the issue identifier are
+   replaced with `_`.
+3. **Agent cwd matches the workspace.** Before launching the agent,
+   the runner asserts `cwd === workspacePath`. Any mismatch fails the
    run before a single line of agent output is produced.
 
-## Hook script safety
+## Skill safety
 
-Workspace hooks (`after_create`, `before_run`, `after_run`, `before_remove`)
-are arbitrary shell scripts read from each repo's `.symphony/workflow.md`.
-They are trusted repo-team configuration, but they are not safe by default:
+Skill definitions (`SKILL.md` files) are markdown documents the agent
+reads and executes via its Bash tool. They are trusted code:
 
-- Hooks run inside the workspace directory only; their `cwd` is the
-  per-issue workspace.
-- Hooks have a configured `hooks.timeout_ms` (default 60s). Timeouts are
-  enforced via `AbortController` so they cannot hang the orchestrator.
-- Hook stdout/stderr is truncated in logs to bound disk and memory use.
-- A hook failure has documented per-hook semantics: see `RELIABILITY.md`.
+- The bundled defaults under `packages/daemon/src/skills/` are
+  operator-reviewed (they ship with the daemon binary).
+- Per-repo overrides under `<repo>/.symphony/skills/` are repo-team
+  authored; review them at the same bar as code in the repo.
+- The agent's interpretation of a skill is not deterministic — the
+  prompt instructs it on inputs/outputs, but the model decides which
+  shell snippets to run. Skills should be written assuming the agent
+  may simplify or substitute commands.
 
 ## Agent tool surface
 
-The Claude Agent SDK is exposed only the tools we explicitly opt into. As of
-this writing those are:
+The Claude Agent SDK is configured with an explicit, narrow tool
+allowlist:
 
-- Built-in tools (file edits, shell execution within the workspace).
-- `linear_graphql` — a custom client-side tool that proxies a single GraphQL
-  operation through Linear using the daemon's existing credentials. We
-  intentionally do **not** plug in Linear's hosted MCP server (see
-  [docs/design-docs/0002-no-linear-mcp.md](docs/design-docs/0002-no-linear-mcp.md)).
+- `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep` — built-ins the
+  agent uses to execute skill steps (clone, run scripts, edit files).
+- `mcp__linear__linear_graphql` — custom MCP tool that proxies a
+  single GraphQL operation through Linear using the daemon's existing
+  credentials. We intentionally do **not** plug in Linear's hosted MCP
+  server (see [docs/design-docs/0002-no-linear-mcp.md](docs/design-docs/0002-no-linear-mcp.md)).
 
 The `linear_graphql` tool wrapper enforces:
 
 - `query` must be a non-empty string.
 - The document must contain exactly one operation (parsed before send).
-- Reuses the daemon's existing Linear endpoint and auth — the agent never sees
-  raw tokens.
+- Reuses the daemon's existing Linear endpoint and auth — the agent
+  never sees raw tokens.
+
+Skill outputs that cross into orchestrator state (today: the
+`@sandbox` skill's `SandboxHandle`) are zod-validated at the boundary.
+Malformed output reclassifies the run from `turn_completed` to
+`turn_failed`.
 
 ## Reporting
 
-This repository is a personal learning project; there is no formal disclosure
-process. If you find a real issue you'd like to share, open a GitHub issue or
-contact the maintainer directly.
+This repository is a personal learning project; there is no formal
+disclosure process. If you find a real issue you'd like to share, open
+a GitHub issue or contact the maintainer directly.

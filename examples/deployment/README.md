@@ -1,24 +1,28 @@
 # Deployment config example
 
+> **Note:** the per-repo `.symphony/workflow.md` flow described below
+> is not currently consumed by the pipeline runner. Per-repo
+> customization that IS wired up is skill overrides at
+> `<repo>/.symphony/skills/<name>/SKILL.md` — the skill loader checks
+> the repo first and falls back to the bundled default.
+
 `symphony.yaml` is the operator-side configuration for a Symphony
 install. One file per Symphony deployment; lists every Linear project
 the daemon should watch.
 
 ## What lives here vs. the per-repo workflow
 
-| Lives in `symphony.yaml` (this file)                              | Lives in `<repo>/.symphony/workflow.md`                |
+| Lives in `symphony.yaml` (this file)                              | Lives in `<repo>/.symphony/`                           |
 | ----------------------------------------------------------------- | ------------------------------------------------------ |
-| Polling interval                                                  | Prompt template body                                   |
-| Workspace root path                                               | Per-repo `agent.allowed_tools`                         |
-| Daemon-wide concurrency caps                                      | Per-repo `agent.model` override (optional)             |
-| ExecutionBackend selector + base image                            | Per-repo budget cap floors (optional)                  |
-| Per-project Linear slug + repo coordinates                        | Repo-team-owned `before_run` / `after_run` hook bodies |
+| Polling interval                                                  | Skill overrides under `skills/<name>/SKILL.md`         |
+| Workspace root path                                               | Per-repo `agent.allowed_tools` (via workflow.md — TBD) |
+| Daemon-wide concurrency caps                                      | Per-repo `agent.model` override (optional — TBD)       |
+| Per-project Linear slug + repo coordinates                        | Per-repo budget cap floors (optional — TBD)            |
 | Operator-side `agent` defaults (model, max_turns, max_budget_usd) |                                                        |
 
-The per-repo workflow lives **inside the cloned repo** and is loaded
-by the agent-runtime in the pod after the clone — the daemon never
-reads it. See [`examples/repo-workflow/`](../repo-workflow/) for the
-template.
+Skill overrides live **inside the cloned repo** and are loaded by
+the daemon's skill loader (repo override → bundled default). See
+[`examples/repo-workflow/`](../repo-workflow/) for the template.
 
 ## Setup
 
@@ -68,22 +72,13 @@ projects:
 
 Optional per-project fields:
 
-| Field                | Default                 | Use when                                              |
-| -------------------- | ----------------------- | ----------------------------------------------------- |
-| `repo.agent_image`   | (resolved per Plan 10)  | You want to pin an explicit pre-built image tag       |
-| `repo.workflow_path` | `.symphony/workflow.md` | The repo keeps its workflow in a non-default location |
-| `repo.branch_prefix` | `symphony/`             | You want per-issue branches to use a different prefix |
+| Field                | Default                 | Use when                                                                                  |
+| -------------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
+| `repo.workflow_path` | `.symphony/workflow.md` | The repo keeps its workflow in a non-default location (currently unused — see note above) |
+| `repo.branch_prefix` | `symphony/`             | You want per-issue branches to use a different prefix                                     |
 
-## The legacy `WORKFLOW.md` flow is gone
+## Invocation
 
-Earlier versions of Symphony accepted a single
-`pnpm symphony path/to/WORKFLOW.md` invocation. That path was removed
-in the Plan 10 consolidation (decision log entry "2026-04-30
-(afternoon) — Legacy `WORKFLOW.md` pipeline removed"). The only
-supported invocation is now `pnpm symphony [path/to/symphony.yaml]`
-(defaults to `./symphony.yaml`).
-
-To migrate an old `WORKFLOW.md`, write a one-project `symphony.yaml`:
-the legacy `tracker.project_slug` becomes `projects[0].linear.project_slug`,
-and the agent's working repo becomes `projects[0].repo.url`. If you ran
-`agent.kind: claude` in-process, set `execution.backend: in-process`.
+The only supported invocation is
+`pnpm symphony [path/to/symphony.yaml]` (defaults to
+`./symphony.yaml`).

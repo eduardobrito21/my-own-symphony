@@ -1,14 +1,13 @@
 # Architecture
 
-> **Updated for Plan 16 (2026-05-17).** The sub-agent pipeline is now
-> wired. The daemon runs the Claude Agent SDK in-process, orchestrating
-> skills (@sandbox, @coder) to provision dev environments and make code
-> changes. ADR 0014 describes the architecture; Plan 15 deleted the
-> old ExecutionBackend/agent-runtime code; Plan 16 implemented the
-> replacement.
-
 This document is the map. It defines the layers, the allowed dependencies
 between them, and where to put new code.
+
+The daemon runs the Claude Agent SDK in-process and orchestrates skills
+(`@sandbox`, `@coder`, with `@app` / `@tester` / `@ci` planned) to
+provision dev environments and make code changes.
+[ADR 0014](docs/design-docs/0014-sub-agent-pipeline-supersedes-execution-backend.md)
+describes the architecture.
 
 The rules described here are **mechanically enforced** by:
 
@@ -65,11 +64,11 @@ tracker  workspace  agent  skills   ← all may use types & config
   observability/  ← cross-cutting; any layer may emit logs/metrics
 ```
 
-The `agent/` layer now contains:
+The `agent/` layer contains:
 
-- `agent/claude/` — Claude Agent SDK wrapper (from Plan 07)
-- `agent/pipeline/` — PipelineAgentRunner that orchestrates skills (Plan 16)
-- `agent/skills/` — skill loader and output schemas (Plan 16)
+- `agent/claude/` — Claude Agent SDK wrapper
+- `agent/pipeline/` — PipelineAgentRunner that orchestrates skills and validates their outputs
+- `agent/skills/` — skill loader and output zod schemas
 
 The `skills/` directory at `packages/daemon/src/skills/` contains bundled
 default skill definitions (SKILL.md files) that the agent loads at runtime.

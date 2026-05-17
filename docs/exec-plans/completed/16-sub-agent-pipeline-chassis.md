@@ -1,6 +1,6 @@
 # Plan 16 — Sub-agent pipeline chassis + first `@sandbox` skill
 
-- **Status:** 🟡 Implementation complete, tests pending
+- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** ADR 0014 (sub-agent pipeline + skill-driven
   provisioning supersedes ExecutionBackend, agent-in-pod, and broker
   transport).
