@@ -15,6 +15,7 @@ import type { AgentEvent, AgentRunInput, AgentRunner } from '../runner.js';
 import { ClaudeAgent, type ClaudeAgentArgs, type QueryFn } from '../claude/agent.js';
 import { loadSkills, SkillNotFoundError, type SkillDefinition } from '../skills/index.js';
 import { buildPipelinePrompt } from './prompt.js';
+import { findSandboxHandleInText } from './validation.js';
 
 /**
  * Per-project dispatch info needed to build the pipeline prompt.
@@ -166,13 +167,64 @@ export class PipelineAgentRunner implements AgentRunner {
 
     const agent = new ClaudeAgent(agentArgs);
 
-    // Forward all events from ClaudeAgent.
-    yield* agent.run({
-      ...input,
-      prompt: pipelinePrompt,
-    });
+    // Forward events as they arrive but accumulate the agent's text
+    // output so we can post-validate the @sandbox stage's JSON handoff
+    // (ADR 0014 Decision 4: skill outputs are zod-validated at the
+    // boundary). We buffer the terminal event so that, if a successful
+    // `turn_completed` arrives but the agent never produced a valid
+    // `SandboxHandle`, we reclassify the run as `turn_failed` before
+    // the orchestrator commits success state.
+    const assistantText: string[] = [];
+    let bufferedTerminal: AgentEvent | null = null;
 
-    log.info('pipeline_run_ended', { attempt: input.attempt });
+    for await (const event of agent.run({ ...input, prompt: pipelinePrompt })) {
+      if (event.kind === 'notification') {
+        // Thinking blocks are prefixed by event-mapping.ts; the
+        // canonical SandboxHandle output is in plain assistant text,
+        // not the model's internal reasoning.
+        if (!event.message.startsWith('[thinking]')) {
+          assistantText.push(event.message);
+        }
+        yield event;
+      } else if (event.kind === 'turn_completed' || event.kind === 'turn_failed') {
+        bufferedTerminal = event;
+      } else {
+        yield event;
+      }
+    }
+
+    if (bufferedTerminal === null) {
+      log.warn('pipeline_no_terminal_from_agent', {});
+      yield this.failedEvent('Pipeline agent closed without a terminal event');
+      return;
+    }
+
+    if (bufferedTerminal.kind === 'turn_failed') {
+      // Agent already failed for its own reason — preserve it, don't
+      // try to validate output that may not exist.
+      log.info('pipeline_run_ended', { attempt: input.attempt, outcome: 'turn_failed' });
+      yield bufferedTerminal;
+      return;
+    }
+
+    const combined = assistantText.join('\n\n');
+    const search = findSandboxHandleInText(combined);
+    if (!search.found) {
+      log.error('pipeline_sandbox_handle_invalid', {
+        reason: search.reason,
+        text_length: combined.length,
+      });
+      yield this.failedEvent(`SandboxHandle validation failed: ${search.reason}`);
+      return;
+    }
+
+    log.info('pipeline_sandbox_handle_validated', {
+      sandbox_id: search.handle.id,
+      sandbox_kind: search.handle.kind,
+      worktree_path: search.handle.worktree_path,
+    });
+    log.info('pipeline_run_ended', { attempt: input.attempt, outcome: 'turn_completed' });
+    yield bufferedTerminal;
   }
 
   /**
