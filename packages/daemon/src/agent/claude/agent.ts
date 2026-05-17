@@ -230,14 +230,13 @@ export class ClaudeAgent implements AgentRunner {
             ...(this.maxBudgetUsd !== undefined && { maxBudgetUsd: this.maxBudgetUsd }),
             ...(resumeWith !== null && { resume: resumeWith.sessionId }),
             // INTENTIONALLY DO NOT set persistSession: false. The
-            // SDK's `resume:` option requires the SDK to have the
-            // session in its own ~/.claude/projects/ store —
-            // disabling persistence makes resume permanently fail
-            // with "No conversation found with session ID: …" on
-            // every dispatch after the first. (Bug 3, smoke run #2,
-            // 2026-04-29.) Our `session.json` is a workspace-local
-            // pointer to the latest session id; the SDK's per-user
-            // store holds the full transcript needed for resume.
+            // SDK's `resume:` option requires the session to live in
+            // the SDK's own ~/.claude/projects/ store — disabling
+            // persistence makes every subsequent resume fail with
+            // "No conversation found with session ID: …". Our
+            // workspace-local `session.json` is just a pointer to the
+            // latest session id; the SDK's per-user store holds the
+            // full transcript that resume needs.
           },
         });
       } catch (cause) {

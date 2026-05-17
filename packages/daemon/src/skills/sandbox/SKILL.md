@@ -28,15 +28,9 @@ The script does the real work. You are the dispatcher.
 >    NOT run `git`, do NOT use `Bash` to redirect into files, do
 >    NOT try to "fix" the script. Bugs in the script are the
 >    operator's concern, not yours — surface them via the failure
->    handle and exit.
->
-> Failure caught during EDU-21 (2026-05-17): the namespace-create
-> script had a path-calc bug; the agent went into debugging mode,
-> read the script, traced the bug, and edited the daemon's source
-> tree to fix it via `bash` + sed-style redirects. That's exactly
-> the EDU-18 host-filesystem-leak class — possible here because
-> `@sandbox` deliberately stays in the daemon (Plan 18b Decision
-> 8). The fix is this rule: stay in your lane.
+>    handle and exit. Editing the daemon's source from inside
+>    `@sandbox` is exactly the host-filesystem-leak class the
+>    sandbox boundary exists to prevent; stay in your lane.
 
 ## Input
 

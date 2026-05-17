@@ -4,7 +4,8 @@
 // It loads skills, builds the orchestration prompt, and runs the
 // Claude SDK in the daemon process.
 //
-// The pipeline shape is fixed in v1: @sandbox → @coder → close out.
+// The pipeline shape is fixed in v1: @sandbox → @planner → @coder →
+// @ci → close out (the @ci stage is conditional — see runner code).
 // The runner loads skills from the repo (if available) or falls back
 // to bundled defaults.
 

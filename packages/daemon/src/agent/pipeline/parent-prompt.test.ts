@@ -324,11 +324,10 @@ describe('buildSubAgents — SDK config', () => {
   });
 
   it("resolves $SKILL_DIR references in SKILL.md to the skill's absolute path", () => {
-    // Plan 18a-followup (post EDU-16 smoke): the SDK gives sub-agents
-    // a fresh shell per Bash call, so $SKILL_DIR can't survive as an
-    // env var. We rewrite the placeholder textually at prompt-build
-    // time. The sub-agent ends up with concrete absolute paths in
-    // its skill markdown — no shell-variable handling required.
+    // The SDK gives sub-agents a fresh shell per Bash call, so
+    // $SKILL_DIR can't survive as an env var. We rewrite the
+    // placeholder textually at prompt-build time so the sub-agent
+    // sees concrete absolute paths in its skill markdown.
     const skills = new Map<string, SkillDefinition>([
       [
         'sandbox',

@@ -51,17 +51,13 @@ const SUB_AGENT_DESCRIPTIONS = {
  *
  * The skill markdown is the body. Its references to `$SKILL_DIR`
  * are rewritten to the absolute path of the skill's directory on
- * disk *before* the SDK sees the prompt. We do this textually
- * (rather than passing `SKILL_DIR=<path>` as documentation and
- * hoping the sub-agent threads it through shell invocations)
- * because the SDK gives sub-agents a fresh shell on each `Bash`
- * call: there is no persistent env var. The first live smoke
- * (EDU-16, 2026-05-17) tripped on this — the sub-agent read
- * `SKILL_DIR=...` as text, then ran `bash "$SKILL_DIR/..."`,
- * which expanded to an empty string in its fresh shell. By
- * resolving the path here, the SKILL.md the sub-agent reads has
- * concrete absolute paths everywhere and no shell-variable
- * gymnastics are required.
+ * disk *before* the SDK sees the prompt. We resolve textually here
+ * (rather than passing `SKILL_DIR=<path>` for the sub-agent to
+ * thread through its own shell invocations) because the SDK gives
+ * sub-agents a fresh shell on each `Bash` call — there is no
+ * persistent env var to read. By baking in concrete absolute paths
+ * here, the SKILL.md the sub-agent reads needs no shell-variable
+ * gymnastics.
  */
 function buildSubAgentPrompt(skill: SkillDefinition): string {
   const skillDir = dirname(skill.path);

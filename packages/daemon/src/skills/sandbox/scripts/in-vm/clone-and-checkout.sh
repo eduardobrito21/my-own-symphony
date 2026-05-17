@@ -10,21 +10,17 @@
 #
 # Why an uploaded script instead of inline `bash -c '<commands>'`:
 # `nsc ssh --container_name` invokes the command via the container
-# runtime's exec primitive (not a shell), and splits the command
-# string on whitespace before forming argv. A multi-line script as a
-# single argv item gets parsed as ["set", "-euo", "pipefail", ...]
-# and exec fails with `exec: "set": executable file not found`.
-# Uploading the script and invoking it by absolute path sidesteps
-# the issue: argv becomes [script-path, arg1, arg2, arg3] — four
-# clean strings. The kernel exec's the script which then interprets
-# its own body via the shebang's `bash`.
-#
-# Discovered during the EDU-22 smoke (2026-05-17 — Plan 18b).
+# runtime's exec primitive (not a shell) and splits the command
+# string on whitespace to form argv. Inlining a multi-statement
+# script as one argv item doesn't work — the first whitespace-bounded
+# token (e.g. `set`) is taken as the executable. An uploaded script
+# invoked by absolute path gives a clean four-element argv:
+# [script-path, repo, default-branch, branch].
 #
 # Args:
 #   $1 - repo URL (e.g. https://github.com/foo/bar.git)
 #   $2 - default branch (e.g. main)
-#   $3 - work branch (e.g. symphony/EDU-22)
+#   $3 - work branch
 #
 # Env (vault-injected into the agent container):
 #   GITHUB_TOKEN - optional; embedded inline in the clone URL so

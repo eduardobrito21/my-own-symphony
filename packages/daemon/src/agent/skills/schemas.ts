@@ -5,7 +5,8 @@
 // state machine, so they get schemas.
 //
 // Per ADR 0014 / Plan 16: the `SandboxHandle` is the load-bearing
-// contract between `@sandbox` and downstream stages (`@coder`, `@ci`).
+// contract between `@sandbox` and the downstream stages
+// (`@planner`, `@coder`, `@ci`).
 
 import { z } from 'zod';
 
