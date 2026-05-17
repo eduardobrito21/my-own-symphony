@@ -19,7 +19,13 @@ agent:
   # Operator-side defaults. Per-repo workflow.md may override
   # `model` / budgets; daemon-wide caps (concurrency, timeouts)
   # are NOT overridable per-repo.
-  model: claude-sonnet-4-6
+  #
+  # Switched to Haiku 4.5 for the Plan 17a smoke (2026-05-17): the
+  # 75k-token first prompt was blowing through Sonnet 4.6's 30k TPM
+  # org cap, costing ~$0.30 per failed first attempt. Haiku has a
+  # much higher TPM bucket and lower per-token cost; quality is
+  # plenty for the MVP coder's "edit one file" job.
+  model: claude-haiku-4-5-20251001
   max_concurrent_agents: 2
   max_turns: 20
   max_budget_usd: 1.0
