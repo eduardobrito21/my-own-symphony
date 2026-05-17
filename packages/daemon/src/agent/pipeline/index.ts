@@ -6,7 +6,9 @@ export {
   type ProjectDispatchInfo,
 } from './runner.js';
 
-export { buildPipelinePrompt, type PipelinePromptContext } from './prompt.js';
+export { buildParentPrompt, type ParentPromptContext } from './parent-prompt.js';
+
+export { buildSubAgents, SUB_AGENT_NAMES, type SubAgentName } from './sub-agents.js';
 
 export {
   extractFencedJsonBlocks,

@@ -14,7 +14,8 @@ import type { Issue, IssueId, ProjectKey } from '../../types/index.js';
 import type { AgentEvent, AgentRunInput, AgentRunner } from '../runner.js';
 import { ClaudeAgent, type ClaudeAgentArgs, type QueryFn } from '../claude/agent.js';
 import { loadSkills, SkillNotFoundError, type SkillDefinition } from '../skills/index.js';
-import { buildPipelinePrompt } from './prompt.js';
+import { buildParentPrompt } from './parent-prompt.js';
+import { buildSubAgents, SUB_AGENT_NAMES } from './sub-agents.js';
 import { findSandboxHandleInText } from './validation.js';
 
 /**
@@ -48,14 +49,13 @@ export interface PipelineAgentRunnerArgs {
 }
 
 /**
- * The skills required by the pipeline.
- *
- * The MVP @ci is conditional at runtime (only invoked if @coder
- * reported changes), but its SKILL.md must be available at prompt-
- * build time so the agent has the instructions in context when it
- * decides whether to run it.
+ * The skills required by the pipeline. Each becomes a native SDK
+ * sub-agent definition (Plan 18a). @ci is conditional at runtime —
+ * the parent only invokes it when @coder reports changed_files —
+ * but its definition is loaded up front so the SDK has the sub-
+ * agent declared when the parent needs to call `Agent`.
  */
-const REQUIRED_SKILLS = ['sandbox', 'coder', 'ci'] as const;
+const REQUIRED_SKILLS = SUB_AGENT_NAMES;
 
 /**
  * PipelineAgentRunner orchestrates the sub-agent pipeline.
@@ -147,22 +147,38 @@ export class PipelineAgentRunner implements AgentRunner {
       return;
     }
 
-    // Build the orchestration prompt.
-    const pipelinePrompt = buildPipelinePrompt({
+    // Plan 18a: parent agent's system prompt is small (issue context
+    // + pipeline shape + close-out instructions). Each skill becomes
+    // a native SDK sub-agent definition; the parent dispatches them
+    // via the `Agent` tool.
+    const parentPrompt = buildParentPrompt({
       issue,
       repoUrl: dispatchInfo.repoUrl,
       defaultBranch: dispatchInfo.defaultBranch,
       branchPrefix: dispatchInfo.branchPrefix,
-      skills,
+    });
+    const subAgents = buildSubAgents(skills);
+
+    log.info('pipeline_prompt_built', {
+      parent_prompt_length: parentPrompt.length,
+      sub_agent_names: Object.keys(subAgents),
+      // Sum of each sub-agent's prompt length, for a sense of how
+      // much only-on-invocation content we deferred out of the
+      // parent prompt. Pre-18a this would have been inlined upfront.
+      sub_agent_total_prompt_length: Object.values(subAgents).reduce(
+        (sum, def) => sum + def.prompt.length,
+        0,
+      ),
     });
 
-    log.info('pipeline_prompt_built', { prompt_length: pipelinePrompt.length });
-
-    // Construct ClaudeAgent with the pipeline prompt as the skill markdown.
-    // The ClaudeAgent treats `skillMarkdown` as the system prompt.
+    // Construct ClaudeAgent with the parent's orchestration prompt
+    // + the SDK-native sub-agent definitions. The parent never edits
+    // files or runs shell commands directly — those tools are scoped
+    // to the sub-agents (see `sub-agents.ts`).
     const agentArgs: ClaudeAgentArgs = {
       linearClient: this.linearClient,
-      skillMarkdown: pipelinePrompt,
+      skillMarkdown: parentPrompt,
+      agents: subAgents,
       logger: this.logger,
       ...(this.model !== undefined && { model: this.model }),
       ...(this.maxModelRoundTrips !== undefined && { maxModelRoundTrips: this.maxModelRoundTrips }),
@@ -179,10 +195,16 @@ export class PipelineAgentRunner implements AgentRunner {
     // `turn_completed` arrives but the agent never produced a valid
     // `SandboxHandle`, we reclassify the run as `turn_failed` before
     // the orchestrator commits success state.
+    //
+    // Plan 18a: with `forwardSubagentText: true` set on the SDK
+    // (see ClaudeAgent), the parent stream now also carries the
+    // sub-agents' assistant text. The SandboxHandle JSON the
+    // @sandbox sub-agent emits lands here just like before, only
+    // produced by a more focused context.
     const assistantText: string[] = [];
     let bufferedTerminal: AgentEvent | null = null;
 
-    for await (const event of agent.run({ ...input, prompt: pipelinePrompt })) {
+    for await (const event of agent.run({ ...input, prompt: parentPrompt })) {
       if (event.kind === 'notification') {
         // Thinking blocks are prefixed by event-mapping.ts; the
         // canonical SandboxHandle output is in plain assistant text,

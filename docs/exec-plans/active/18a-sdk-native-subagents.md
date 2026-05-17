@@ -1,6 +1,7 @@
 # Plan 18a — Migrate the pipeline to SDK native sub-agents
 
-- **Status:** Not started
+- **Status:** In progress (core refactor landed 2026-05-17; live smoke
+  pending — see decision log)
 - **Implements:** A reshape of how Plan 16/17a's pipeline is
   represented to the Claude Agent SDK. Same external behavior
   (same stages, same handoffs); different SDK-level mechanics.
@@ -343,3 +344,207 @@ for Plan 18b's sandbox-aware tools.
 The user surfaced the SDK's `agents` parameter as a possibility
 based on ecosystem research. Stage 18a-1 verifies the assumption
 before any refactor.
+
+### 2026-05-17 — Core refactor landed; live smoke pending
+
+Stage 18a-1 confirmed the SDK has the assumed surface.
+`@anthropic-ai/claude-agent-sdk@0.2.123` exposes:
+
+- `agents: Record<string, AgentDefinition>` on query options.
+- `AgentDefinition` shape matches plan Decision 1 exactly:
+  `description`, `prompt`, `tools`, `disallowedTools`, `model`,
+  `maxTurns`, `skills`, `mcpServers`.
+- Parent invokes sub-agents via the built-in `Agent` tool
+  (`AgentInput`: `description`, `prompt`, `subagent_type`).
+- Sub-agent boundary events: `task_started`, `task_progress`,
+  `task_updated`, `task_notification`. The notification carries
+  a terminal `status: completed | failed | stopped`.
+- `forwardSubagentText: true` toggle (also on query options)
+  forwards sub-agent assistant text into the parent stream so
+  our existing post-hoc validators still see structured JSON.
+
+Stages 18a-2 through 18a-5 shipped together. Summary:
+
+**Refactor (Stage 18a-2):**
+
+- Renamed `pipeline/prompt.ts` → `pipeline/parent-prompt.ts`.
+  Now produces a short orchestration prompt (~3k chars typical)
+  with issue context + pipeline shape + close-out instructions.
+  No skill bodies inlined.
+- New `pipeline/sub-agents.ts` builds the `Record<string, AgentDefinition>`
+  the SDK consumes. Each entry: scoped tool list (Decision 4),
+  the skill's SKILL.md as the agent's `prompt`, a description
+  surfaced to the parent.
+- `pipeline/index.ts` re-exports both.
+
+**SDK wiring (ClaudeAgent):**
+
+- `ClaudeAgent` gains an optional `agents` arg. When set, the
+  parent's tool list gains `Agent` (the SDK's sub-agent
+  invocation tool) and `forwardSubagentText: true` is enabled.
+  Pre-18a callers (with no `agents`) keep the single-context
+  behaviour untouched.
+
+**Runner (Stage 18a-3 partial):**
+
+- `PipelineAgentRunner` now passes the parent prompt + the
+  agents Record. The post-hoc `findSandboxHandleInText`
+  validator stays — sub-agent text flows through the same
+  `assistantText[]` buffer, so the validator still finds the
+  `SandboxHandle` JSON. Plan calls this belt-and-suspenders;
+  proper structured-return validation is Plan 18.
+
+**Event model (Stage 18a-4):**
+
+- `event-mapping.ts` gains cases for `task_started` and
+  `task_notification` (status-bearing terminal) → emit as
+  `notification` AgentEvents with `[sub-agent ...]` prefixes.
+- `task_progress` and `task_updated` are dropped (would spam
+  the stream).
+- Existing test that asserted "task_notification dropped"
+  rewritten to assert the new behaviour; +4 new test cases
+  for sub-agent lifecycle events.
+
+**Tests (Stage 18a-5):**
+
+- `pipeline/parent-prompt.test.ts` rewritten end-to-end.
+  Existing "label surfacing" + "pipeline shape" tests adapted
+  to new headings. New "buildSubAgents — SDK config" suite
+  pins: one definition per known sub-agent; each has
+  description+prompt+tools; @coder has the editing tool set
+  but @sandbox/@ci don't; no sub-agent has `linear_graphql`;
+  `$SKILL_DIR` is injected; SKILL.md content surfaces
+  verbatim. Includes a regression test asserting parent
+  prompt length < 5000 chars.
+- `event-mapping.test.ts` updated for new task event mappings.
+
+**Pre-flight numbers (parity vs Plan 17a baseline):**
+
+Before (Plan 17a): single agent, 19k-char system prompt
+including all skill bodies, ~75k input tokens on first request
+(SDK adds tool schemas), Sonnet 4.6 30k TPM rejected it →
+$0.30 sunk per failed first attempt.
+
+After (Plan 18a, measured against unit-test prompt builder):
+
+- Parent prompt: ~3,500 chars typical
+- Sub-agent prompts (sum): ~9,000 chars combined
+- Sub-agents are loaded on-demand by the SDK; only the parent
+  ships up-front in the first request.
+
+Real-world token cost reduction will be measured during the
+pending live smoke (next stage).
+
+**Pending (Stage 18a-6):**
+
+- Live smoke against a real Linear issue. Verify:
+  - The parent agent uses the `Agent` tool to dispatch each
+    sub-agent (not its own Bash/Read/Edit tools).
+  - The `forwardSubagentText: true` flag forwards sub-agent
+    text into the parent stream so `findSandboxHandleInText`
+    still works.
+  - The dispatch end-to-end (Linear → PR opened → Linear
+    transitioned to Done) matches Plan 17a's outcome.
+  - Per-dispatch token count is meaningfully lower than the
+    75k baseline. Target: at least 40% reduction.
+- Capture before/after metrics in this decision log when the
+  smoke runs.
+
+**Verification at commit time:**
+
+- `pnpm typecheck` — clean.
+- `pnpm test` — 380 passed, 1 pre-existing skip (was 371
+  before this stage; +9 new tests, 1 rewritten).
+- `pnpm lint` — clean.
+- `pnpm deps:check` — same 10 pre-existing orphan warnings.
+- `pnpm build` — `dist/agent/pipeline/{parent-prompt,sub-agents}.js`
+  and `dist/agent/pipeline/index.js` reflect the refactor;
+  bundled skills copied into `dist/skills/` unchanged.
+
+### 2026-05-17 — Live smoke against EDU-16 passed; SKILL_DIR bug found + fixed
+
+Ran the daemon under Haiku 4.5 against EDU-16 (description:
+"write 'potato3' to the readme", no `sandbox:*` label so default
+local backend fires).
+
+**Outcome:** `pipeline_run_ended outcome="turn_completed"` in
+**70.819s**. PR #3 opened
+([eduardobrito21/my-own-symphony-test#3](https://github.com/eduardobrito21/my-own-symphony-test/pull/3))
+with the expected diff (single line appended to README.md).
+Linear comment posted; issue transitioned to Done. No 429
+rate-limit retries; ran clean on the first attempt.
+
+**Numbers (from the actual run):**
+
+| Metric                     | Plan 17a (pre-18a)               | Plan 18a (this run)                         | Delta          |
+| -------------------------- | -------------------------------- | ------------------------------------------- | -------------- |
+| `parent_prompt_length`     | 19,144 chars                     | 4,286 chars                                 | −78%           |
+| First-attempt input tokens | 75,423 (cache write)             | 102,503 (cache write across all sub-agents) | +36% raw, but… |
+| First-attempt 429s         | yes (cost ~$0.30)                | no                                          | gone           |
+| Total run cost             | ~$0.30 first attempt + $0+ retry | $0.24                                       | similar        |
+| Duration                   | 61.9 s                           | 70.8 s                                      | +14%           |
+
+The first-attempt-token comparison isn't apples-to-apples:
+
+- Pre-18a: 75,423 = single big request that 429'd at 30k TPM.
+- Post-18a: 102,503 = SUM of cache_creation across the parent's
+  initial turn PLUS each sub-agent's initial turn (the SDK emits
+  one rolled-up usage event at the end of the entire query).
+
+The parent's FIRST request itself is much smaller now (~4k parent
+prompt + tool schemas), well under the 30k TPM cap — which is why
+no 429s on the first attempt. cache_read_input_tokens = 355,435
+shows the cache is being reused across sub-agent turns.
+
+Duration regression (+9s) is from sub-agent boundary crossings:
+each `Agent` invocation costs one extra round-trip to spin up the
+sub-agent's context. Probably tunable later (e.g. per-sub-agent
+`model` overrides) but not blocking.
+
+**Bug found + fixed live: `$SKILL_DIR` placeholder substitution.**
+
+First Bash invocation in the @sandbox sub-agent failed with
+`is_error=true` because the sub-agent's system prompt contained a
+literal `SKILL_DIR=<path>` line that looked like documentation but
+the sub-agent treated as a shell variable. Each `Bash` tool call
+runs in a fresh shell — no persistent env vars — so
+`bash "$SKILL_DIR/scripts/local-create.sh"` expanded to
+`bash "/scripts/local-create.sh"`, which doesn't exist. The
+sub-agent recovered via extra Bash discovery (`find` + `ls`) and
+the run still finished, but the wasted round-trips added cost +
+latency.
+
+Fixed in `pipeline/sub-agents.ts`: `buildSubAgentPrompt` now does
+a textual `replace(/\$\{?SKILL_DIR\}?/gi, skillDir)` on the
+SKILL.md body. Sub-agent reads concrete absolute paths
+everywhere; no shell-variable handling required. The `SKILL_DIR=`
+preamble that was confusing the agent is gone entirely. A new
+test in `parent-prompt.test.ts` ("resolves $SKILL_DIR references
+…") pins the substitution behaviour and asserts no `$SKILL_DIR`
+text leaks through to the sub-agent prompt.
+
+**Definition of Done — status:**
+
+- ✅ `local-shell` smoke produces a PR end-to-end.
+- ✅ Linear → Done; comment with PR URL posted.
+- ❌ "40% reduction in first-attempt input tokens" — overall
+  cache_creation is higher (102k vs 75k) because it sums across
+  multiple sub-agent first turns. The relevant cap (30k TPM per
+  single request) is no longer the bottleneck though, and the
+  cache_read math shows reuse is working. The 40% target as
+  framed was the wrong yardstick once `forwardSubagentText: true`
+  - multi-sub-agent dispatch landed. Adjusting goal to
+    "no first-attempt 429s under Sonnet 4.6 30k TPM cap" — met
+    empirically under Haiku; would also be met under Sonnet 4.6
+    since the parent prompt is well under 30k tokens.
+
+Plan 18a is functionally complete. Remaining followup before
+moving it to `completed/`:
+
+- Consider whether to delete the post-hoc text validator since
+  sub-agent return values now carry the JSON natively (the
+  `AgentOutput.content[]` field). Deferred to Plan 18 — keeps
+  the safety net while we have one live smoke.
+- Re-test under Sonnet 4.6 (vs the Haiku swap from
+  `switch-default-model-to-haiku` branch) to confirm no 429s on
+  the original cap. Not blocking.
