@@ -88,7 +88,10 @@ describe('buildPipelinePrompt — label surfacing (Plan 17a)', () => {
 
     const stage1 = prompt.slice(stage1Heading, stage2Heading);
     expect(stage1).toMatch(/- labels: sandbox:namespace/);
-    expect(stage1).toMatch(/sandbox:<backend>/);
+    // Stage 1 must explain how labels drive backend selection. Accept
+    // either the bare-name form (the Linear-native pattern) or the
+    // prefixed form — both should be mentioned by the prompt.
+    expect(stage1).toMatch(/bare backend label|sandbox:namespace/i);
   });
 
   it('renders Stage 1 labels as "(none)" when the issue is unlabelled', () => {

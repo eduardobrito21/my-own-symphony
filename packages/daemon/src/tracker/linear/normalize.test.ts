@@ -43,6 +43,25 @@ describe('normalizeFullIssue', () => {
     expect(issue.labels).toEqual(['bug', 'frontend']);
   });
 
+  it('rejoins parent/child label groups with a colon', () => {
+    // Linear models `sandbox:namespace`-style labels as parent/child
+    // IssueLabels. The API returns only the leaf name; we rejoin so
+    // downstream code (@sandbox dispatcher matching) sees the
+    // colon-prefixed form the user typed in the UI.
+    const issue = normalizeFullIssue(
+      makeFull({
+        labels: {
+          nodes: [
+            { name: 'namespace', parent: { name: 'sandbox' } },
+            { name: 'high', parent: { name: 'priority' } },
+            { name: 'standalone' }, // no parent
+          ],
+        },
+      }),
+    );
+    expect(issue.labels).toEqual(['sandbox:namespace', 'priority:high', 'standalone']);
+  });
+
   it('preserves null priority / description / branchName / url', () => {
     const issue = normalizeFullIssue(
       makeFull({

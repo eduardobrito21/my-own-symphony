@@ -28,7 +28,7 @@ const FULL_ISSUE_FIELDS = `
   createdAt
   updatedAt
   state { name }
-  labels { nodes { name } }
+  labels { nodes { name parent { name } } }
   inverseRelations {
     # NOTE: Linear schema does not allow a filter argument on this
     # field. We fetch the relation type string and narrow to "blocks"

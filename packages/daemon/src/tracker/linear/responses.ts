@@ -25,6 +25,16 @@ const StateRefSchema = z.object({
 
 const LabelNodeSchema = z.object({
   name: z.string(),
+  /**
+   * Linear "label groups" are modeled as parent/child IssueLabels.
+   * When a user creates a label named `sandbox:namespace` in Linear's
+   * UI, the colon splits the name and Linear creates two records:
+   * a parent label `sandbox` and a child `namespace`. The API
+   * returns just the leaf `name` here, with the parent's name on
+   * `parent.name`. We rejoin them in `normalizeFullIssue` so
+   * downstream code sees the original colon-joined form.
+   */
+  parent: z.object({ name: z.string() }).nullable().optional(),
 });
 
 /**
