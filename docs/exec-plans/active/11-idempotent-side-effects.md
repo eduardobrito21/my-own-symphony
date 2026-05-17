@@ -107,7 +107,7 @@ Dispatch N+1 → fresh Namespace instance →
 - **Linear comment editing** (rather than appending).
 - **Wrapper scripts (`symphony-pr-ensure`) baked into a base
   image.** Removed in this reshape — the agent uses `gh pr
-  view` + `gh pr create` directly via its Bash tool.
+view` + `gh pr create` directly via its Bash tool.
 - **PR conflict handling** when fast-forward push fails. The
   agent gets the error in `tool_result` and decides what to
   do; we don't bake conflict resolution.
@@ -145,7 +145,7 @@ Dispatch N+1 → fresh Namespace instance →
      marker."
    - Same pattern for `completed` and `pr-link`.
    - "Before opening a PR, run `gh pr view <branch> --json
-     url --jq .url`. If exit 0, push commits to the existing
+url --jq .url`. If exit 0, push commits to the existing
      branch and reference the URL. If exit 1, run
      `gh pr create`."
 

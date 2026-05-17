@@ -5,10 +5,10 @@
 // return values rather than thrown across the layer boundary so the
 // orchestrator can handle them structurally.
 //
-// Filesystem and hook failures get distinct codes because the
-// orchestrator's response differs:
+// Hook-related error variants (HookTimeoutError, HookNonZeroExitError,
+// HookSpawnError) were removed in Plan 15 when the hook system moved
+// into the future @app skill. Filesystem failures remain.
 //   - workspace creation failure -> retry next tick
-//   - hook timeout -> kill child, retry with backoff
 //   - path containment violation -> never retry, fail loudly (this
 //     would indicate a bug in our sanitization logic)
 
@@ -32,33 +32,7 @@ export interface WorkspaceNotADirectoryError {
   readonly path: string;
 }
 
-export interface HookTimeoutError {
-  readonly code: 'hook_timeout';
-  readonly message: string;
-  readonly hook: string;
-  readonly timeoutMs: number;
-}
-
-export interface HookNonZeroExitError {
-  readonly code: 'hook_non_zero_exit';
-  readonly message: string;
-  readonly hook: string;
-  readonly exitCode: number;
-  readonly stdoutTail: string;
-  readonly stderrTail: string;
-}
-
-export interface HookSpawnError {
-  readonly code: 'hook_spawn_failed';
-  readonly message: string;
-  readonly hook: string;
-  readonly cause: unknown;
-}
-
 export type WorkspaceError =
   | WorkspaceContainmentError
   | WorkspaceCreationError
-  | WorkspaceNotADirectoryError
-  | HookTimeoutError
-  | HookNonZeroExitError
-  | HookSpawnError;
+  | WorkspaceNotADirectoryError;

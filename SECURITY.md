@@ -1,5 +1,15 @@
 # Security
 
+> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
+> describes the pre-pivot trust model, which assumed an in-pod agent
+> reached via the daemon's reverse socket. ADR 0014 changes this: the
+> agent runs in the daemon's process; isolation moves to the
+> `@infra` skill's sandbox (provisioned per-dispatch) and the
+> agent's tool surface (no host Bash; all Bash routes through
+> `@infra`'s exec). Plan 15 deletes the dead code; Plan 16 will
+> rewrite this document with the post-pivot trust model. Read below
+> as historical context until then.
+
 This document describes Symphony's trust model, the secrets it handles, and
 the operational safety invariants enforced by the codebase.
 

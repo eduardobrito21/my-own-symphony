@@ -1,25 +1,22 @@
 // `WorkspaceManager` — the layer's public surface.
 //
-// Composes `paths.ts`, `hooks.ts`, and a few `node:fs/promises`
-// primitives into the lifecycle the orchestrator wants:
+// Composes `paths.ts` and a few `node:fs/promises` primitives into the
+// lifecycle the orchestrator wants:
 //
 //   prepareForRun(identifier)
-//     -> createForIssue (mkdir + after_create on first creation)
-//     -> before_run
+//     -> createForIssue (mkdir)
 //     -> Workspace
 //
 //   finalizeAfterRun(workspace)
-//     -> after_run (best effort; failures logged, not thrown)
+//     -> no-op
 //
 //   removeForTerminal(identifier)
-//     -> before_remove (best effort)
 //     -> rm -rf
 //
-// SPEC §9.4 failure semantics:
-//   - after_create / before_run failures are FATAL to this attempt.
-//     We surface them as Result errors so the orchestrator can retry.
-//   - after_run / before_remove failures are LOGGED and IGNORED so a
-//     broken cleanup hook can't block progress.
+// Per Plan 15, the hook subsystem (after_create / before_run /
+// after_run / before_remove) is removed. Per-repo lifecycle steps
+// move into the future @app skill (Plan 16). The method names are
+// preserved so the orchestrator's callers don't churn.
 //
 // Per-issue concurrency: the orchestrator's own claim system prevents
 // two workers running on the same issue at once, but tests and
@@ -30,7 +27,6 @@
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import type { HooksConfig } from '../config/schema.js';
 import {
   sanitizeIdentifier,
   type IssueIdentifier,
@@ -43,7 +39,6 @@ import type {
   WorkspaceError,
   WorkspaceNotADirectoryError,
 } from './errors.js';
-import { runHook, type HookName, type HookRunFailure } from './hooks.js';
 import { WorkspaceContainmentException, workspacePathFor } from './paths.js';
 
 export type CreateResult =
@@ -55,11 +50,9 @@ export type PrepareResult = CreateResult;
 export interface WorkspaceManagerArgs {
   /** Absolute path to `workspace.root`. */
   readonly root: string;
-  readonly hooks: HooksConfig;
   /**
-   * Optional logger for best-effort hook failures. Defaults to a
-   * no-op so tests don't have to inject one. Plan 04+ wires the real
-   * `pino` logger via the composition root.
+   * Optional logger for filesystem cleanup failures. Defaults to a
+   * no-op so tests don't have to inject one.
    */
   readonly logger?: WorkspaceLogger;
 }
@@ -70,8 +63,6 @@ export interface WorkspaceLogger {
 }
 
 const NOOP_LOGGER: WorkspaceLogger = {
-  // No-op logger: drops messages on the floor. Plan 04+ wires the real
-  // `pino` logger via the composition root.
   warn() {
     /* intentionally empty */
   },
@@ -82,27 +73,11 @@ const NOOP_LOGGER: WorkspaceLogger = {
 
 export class WorkspaceManager {
   private readonly root: string;
-  // Mutable so dynamic `WORKFLOW.md` reload (Plan 05) can swap hook
-  // scripts and timeout in place without recreating the manager.
-  // Reads always go through `this.hooks.<field>`; we never close
-  // over the value at method-define time.
-  private hooks: HooksConfig;
   private readonly logger: WorkspaceLogger;
 
   constructor(args: WorkspaceManagerArgs) {
     this.root = args.root;
-    this.hooks = args.hooks;
     this.logger = args.logger ?? NOOP_LOGGER;
-  }
-
-  /**
-   * Replace the live hook config. Used by the orchestrator when
-   * `WORKFLOW.md` is reloaded so future runs use the new scripts /
-   * timeout. In-flight hooks already running keep their original
-   * values (we don't try to re-target a process mid-execution).
-   */
-  setHooks(hooks: HooksConfig): void {
-    this.hooks = hooks;
   }
 
   /**
@@ -119,10 +94,9 @@ export class WorkspaceManager {
   }
 
   /**
-   * Ensure the per-issue workspace directory exists. Runs the
-   * `after_create` hook only when the directory is freshly created.
-   * Reusing an existing workspace is the common case (workspaces are
-   * preserved across runs per SPEC §9.1).
+   * Ensure the per-issue workspace directory exists. Reusing an
+   * existing workspace is the common case (workspaces are preserved
+   * across runs per SPEC §9.1).
    */
   async createForIssue(
     identifier: IssueIdentifier,
@@ -132,9 +106,6 @@ export class WorkspaceManager {
     try {
       path = workspacePathFor(this.root, identifier, projectKey);
     } catch (cause) {
-      // workspacePathFor throws a `WorkspaceContainmentException` that
-      // carries a typed `WorkspaceContainmentError` payload. Lift the
-      // payload into our Result error union; rethrow anything else.
       if (cause instanceof WorkspaceContainmentException) {
         return { ok: false, error: cause.payload };
       }
@@ -152,77 +123,34 @@ export class WorkspaceManager {
       createdNow: createResult.createdNow,
     };
 
-    if (workspace.createdNow && this.hooks.after_create !== undefined) {
-      const hookResult = await runHook({
-        name: 'after_create',
-        script: this.hooks.after_create,
-        cwd: path,
-        timeoutMs: this.hooks.timeout_ms,
-      });
-      if (!hookResult.ok) {
-        // SPEC §9.4: after_create failure is fatal to creation.
-        // We do not roll back the directory — leaving it lets the
-        // operator inspect post-mortem. The orchestrator will retry.
-        return { ok: false, error: failureToError(hookResult) };
-      }
-    }
-
     return { ok: true, workspace };
   }
 
   /**
-   * Full pre-run lifecycle: create (or reuse) the workspace, run
-   * `before_run`. Used by the orchestrator's worker before launching
-   * the agent.
+   * Pre-run lifecycle: create (or reuse) the workspace. Kept as a
+   * named method so callers don't churn after the hook removal in
+   * Plan 15 — it's now equivalent to `createForIssue`.
    */
   async prepareForRun(
     identifier: IssueIdentifier,
     projectKey: ProjectKey | null = null,
   ): Promise<PrepareResult> {
-    const created = await this.createForIssue(identifier, projectKey);
-    if (!created.ok) return created;
-
-    if (this.hooks.before_run !== undefined) {
-      const hookResult = await runHook({
-        name: 'before_run',
-        script: this.hooks.before_run,
-        cwd: created.workspace.path,
-        timeoutMs: this.hooks.timeout_ms,
-      });
-      if (!hookResult.ok) {
-        return { ok: false, error: failureToError(hookResult) };
-      }
-    }
-
-    return created;
+    return this.createForIssue(identifier, projectKey);
   }
 
   /**
-   * Run the `after_run` hook. Failures are logged and swallowed —
-   * the worker's outcome (success / failure / cancellation) takes
-   * precedence over a flaky cleanup hook.
+   * Kept as a no-op so the orchestrator's call sites compile until
+   * Plan 16 reshapes them. Previously ran the `after_run` hook.
    */
-  async finalizeAfterRun(workspace: Workspace): Promise<void> {
-    if (this.hooks.after_run === undefined) return;
-    const result = await runHook({
-      name: 'after_run',
-      script: this.hooks.after_run,
-      cwd: workspace.path,
-      timeoutMs: this.hooks.timeout_ms,
-    });
-    if (!result.ok) {
-      this.logger.warn('after_run hook failed (ignored per SPEC §9.4)', {
-        workspace_path: workspace.path,
-        error: result.error,
-      });
-    }
+  async finalizeAfterRun(_workspace: Workspace): Promise<void> {
+    /* no-op post Plan 15 */
   }
 
   /**
-   * Remove a workspace for a terminal issue. Runs `before_remove`
-   * first (best effort), then `rm -rf`. Hook and removal failures
-   * are both logged and ignored so the orchestrator's startup sweep
-   * is not blocked by an unhealthy workspace.
+   * Remove a workspace for a terminal issue. Previously ran the
+   * `before_remove` hook first; Plan 15 dropped that. Removal
+   * failures are logged and ignored so the orchestrator's startup
+   * sweep is not blocked by an unhealthy workspace.
    */
   async removeForTerminal(
     identifier: IssueIdentifier,
@@ -232,8 +160,6 @@ export class WorkspaceManager {
     try {
       path = workspacePathFor(this.root, identifier, projectKey);
     } catch (cause) {
-      // Containment failure during removal would mean someone tried
-      // to remove a path outside the root — refuse loudly.
       this.logger.error('refused to remove workspace outside root', {
         identifier,
         cause,
@@ -241,7 +167,6 @@ export class WorkspaceManager {
       return;
     }
 
-    // If the workspace doesn't exist, we have nothing to do.
     let exists: boolean;
     try {
       await stat(path);
@@ -250,21 +175,6 @@ export class WorkspaceManager {
       exists = false;
     }
     if (!exists) return;
-
-    if (this.hooks.before_remove !== undefined) {
-      const result = await runHook({
-        name: 'before_remove',
-        script: this.hooks.before_remove,
-        cwd: path,
-        timeoutMs: this.hooks.timeout_ms,
-      });
-      if (!result.ok) {
-        this.logger.warn('before_remove hook failed (cleanup proceeds)', {
-          workspace_path: path,
-          error: result.error,
-        });
-      }
-    }
 
     try {
       await rm(path, { recursive: true, force: true });
@@ -332,8 +242,6 @@ async function ensureDirectoryAtomic(
     }
   }
 
-  // EEXIST: confirm it's actually a directory and not a file someone
-  // dropped at the workspace path.
   try {
     const info = await stat(path);
     if (!info.isDirectory()) {
@@ -361,15 +269,8 @@ async function ensureDirectoryAtomic(
   return { ok: true, createdNow: false };
 }
 
-/** Lift a hook failure result into the `WorkspaceError` union. */
-function failureToError(failure: HookRunFailure): WorkspaceError {
-  return failure.error;
-}
-
 function stringifyCause(cause: unknown): string {
   if (cause instanceof Error) return cause.message;
   if (typeof cause === 'string') return cause;
   return String(cause);
 }
-
-export type { HookName };

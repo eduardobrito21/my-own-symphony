@@ -66,7 +66,7 @@ This collapses three open questions at once:
 3. **Daemon ↔ pod transport** (ADR 0013) → no transport. The
    parent agent runs **in the daemon's process** via the Claude
    Agent SDK. Sub-agents are SDK sub-agents (in-process). The
-   things that *do* run remotely (sandboxes, services) are
+   things that _do_ run remotely (sandboxes, services) are
    addressed by the @infra skill's remote-exec tools.
 
 ## Decision
@@ -161,7 +161,7 @@ controlled by us.
 ### Keep ExecutionBackend; let it return a sandbox the @infra skill operates on
 
 Hybrid: Symphony still picks "container or VM or microVM," but
-the *inside* of the sandbox is configured by skills. Rejected:
+the _inside_ of the sandbox is configured by skills. Rejected:
 the platform choice is just as much a per-repo / per-issue
 decision as the inside is. Bank repos may need a Namespace
 sandbox; toy repos may want local docker. The @infra skill is

@@ -1,5 +1,12 @@
 # Architecture
 
+> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
+> describes the pre-pivot architecture (daemon + agent-runtime
+> package, `ExecutionBackend` seam, per-pod isolation). ADR 0014
+> replaces it with a sub-agent pipeline + skill-driven provisioning.
+> Plan 15 deletes the dead code (this commit); Plan 16 will rewrite
+> this document. Read below as historical context until then.
+
 This document is the map. It defines the layers, the allowed dependencies
 between them, and where to put new code.
 

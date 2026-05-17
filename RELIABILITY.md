@@ -1,5 +1,14 @@
 # Reliability
 
+> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
+> describes the pre-pivot failure model (in-pod agent, reverse-socket
+> transport, ExecutionBackend lifecycle). ADR 0014 changes the model:
+> failures now propagate through sub-agent handoffs; sandbox leaks
+> are guarded by deadline-based auto-expire in the `@infra` skill;
+> daemon-restart resilience comes from idempotent re-dispatch (Plan 11) rather than socket reattach. Plan 15 deletes the dead code;
+> Plan 16 will rewrite this document. Read below as historical
+> context until then.
+
 This document describes Symphony's failure model: what kinds of failures the
 system anticipates, how it responds to each, and what guarantees it provides
 under degraded conditions.

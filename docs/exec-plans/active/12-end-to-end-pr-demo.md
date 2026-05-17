@@ -14,7 +14,7 @@
     reattach, no pod-keeps-running-without-daemon scenario.
   - The `LocalDockerBackend` smoke from Plan 10 referenced as a
     no-regression target is dead; replaced by "in-process agent
-    + @infra-spun sandbox" smoke under Plan 16.
+    - @infra-spun sandbox" smoke under Plan 16.
 - This plan stays `active/` because the **goal** stands; the
   **how** gets rewritten after Plan 16 lands.
 - **Extracted from:** original Plan 09 stage 09f. Split out

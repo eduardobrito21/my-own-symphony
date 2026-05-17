@@ -25,8 +25,6 @@ describe('buildDeploymentConfigSchema', () => {
     if (!result.success) return;
     const config = result.data;
     expect(config.polling.interval_ms).toBe(30_000);
-    expect(config.execution.backend).toBe('local-docker');
-    expect(config.execution.base_image).toBe('symphony/agent-base:1');
     expect(config.agent.model).toBe('claude-haiku-4-5');
     expect(config.agent.max_concurrent_agents).toBe(10);
     expect(config.projects).toHaveLength(1);
@@ -39,7 +37,6 @@ describe('buildDeploymentConfigSchema', () => {
     const schema = buildDeploymentConfigSchema('/tmp/dep');
     const result = schema.safeParse({
       polling: { interval_ms: 10_000 },
-      execution: { backend: 'in-process', base_image: 'symphony/agent-base:2' },
       projects: [
         {
           linear: { project_slug: 'edu' },
@@ -62,7 +59,6 @@ describe('buildDeploymentConfigSchema', () => {
     expect(result.success).toBe(true);
     if (!result.success) return;
     expect(result.data.polling.interval_ms).toBe(10_000);
-    expect(result.data.execution.backend).toBe('in-process');
     expect(result.data.projects).toHaveLength(2);
     expect(result.data.projects[0]?.repo.agent_image).toBe('symphony-agent/symphony:latest');
     expect(result.data.projects[1]?.repo.branch_prefix).toBe('mkt/');
@@ -107,20 +103,6 @@ describe('buildDeploymentConfigSchema', () => {
           (i as { keys?: string[] }).keys?.includes('intterval_ms'),
       ),
     ).toBe(true);
-  });
-
-  it('rejects an invalid execution.backend enum value', () => {
-    const schema = buildDeploymentConfigSchema('/tmp/dep');
-    const result = schema.safeParse({
-      execution: { backend: 'kubernetes' },
-      projects: [
-        {
-          linear: { project_slug: 'a' },
-          repo: { url: 'https://github.com/o/r.git' },
-        },
-      ],
-    });
-    expect(result.success).toBe(false);
   });
 
   it('passes through unknown TOP-level keys (forward compat)', () => {

@@ -1,5 +1,14 @@
 # my-own-symphony
 
+> **⚠️ Post-ADR 0014 architecture pivot (2026-05-17).** This document
+> describes the pre-pivot architecture (per-pod agent runtime,
+> `ExecutionBackend` abstraction, `LocalDockerBackend`,
+> `agent-runtime` package). ADR 0014 replaces all of that with a
+> sub-agent pipeline + skill-driven provisioning. Plan 15 deletes the
+> dead code (this commit); Plan 16 will add the new architecture's
+> code and rewrite this README to describe it. Read the sections
+> below as historical context until then.
+
 A TypeScript reimplementation of [openai/symphony](https://github.com/openai/symphony),
 built harness-first using the [Claude Agent SDK](https://docs.anthropic.com/en/api/agent-sdk/overview).
 

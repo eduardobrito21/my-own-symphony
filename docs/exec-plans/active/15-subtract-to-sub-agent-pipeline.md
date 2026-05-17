@@ -187,7 +187,7 @@ These survive but their role changes.
    - `deployment.ts` — drop the `execution.backend` enum
      (`local-docker` / `namespace`). Drop `execution.base_image`.
      Add a `skills` section (paths to skill bundles) — but defer
-     the *shape* of that section to Plan 16. Plan 15 just
+     the _shape_ of that section to Plan 16. Plan 15 just
      removes the dead fields.
    - `deployment.test.ts` — update tests.
    - `parse.ts`, `parse.test.ts` — adapt to the new schema.
@@ -252,7 +252,7 @@ These survive but their role changes.
 16. **Plan 14** — flip status from
     `🔴 Superseded by ADR 0013; pending Plan 15` to
     `🔴 Superseded by Plan 15 (the kill); replaced by future
-     Plan 16`. Note that the `plan14-namespace-backend` branch
+Plan 16`. Note that the `plan14-namespace-backend` branch
     stays as reference for Compute.Instance plumbing.
 
 17. **Plan 12** — note that "end-to-end PR demo" survives but
@@ -293,8 +293,7 @@ These survive but their role changes.
 
 ### Stage 15a — Doc status updates (do first, cheap, unblocks others)
 
-1. Add the header notes + flip statuses on ADRs 0011, 0012,
-   0013.
+1. Add the header notes + flip statuses on ADRs 0011, 0012, 0013.
 2. Add the header notes + flip statuses on Plans 12, 13, 14.
 3. Update `docs/design-docs/index.md`.
 4. Add the "post-ADR 0014" banner to `README.md`,
@@ -318,7 +317,7 @@ These survive but their role changes.
     to drop everything that constructed an ExecutionBackend.
     The daemon's `main()` will need a temporary placeholder
     where the dispatch invocation used to happen (`// TODO Plan
-    16: spawn initial agent here`).
+16: spawn initial agent here`).
 14. `pnpm typecheck` — expect a wave of errors as the
     composition root unwinds. Fix mechanically: delete imports,
     delete construction code, comment dispatch site.
@@ -367,7 +366,7 @@ These survive but their role changes.
 ### Stage 15g — Final sweep
 
 25. `pnpm typecheck && pnpm lint && pnpm deps:check && pnpm
-    test` should pass (with the `.skip`'d tests). Anything else
+test` should pass (with the `.skip`'d tests). Anything else
     failing means a stray reference; fix.
 26. `git status` should show **only deletions** (and the doc
     status updates from Stage 15a, and the placeholder comment
