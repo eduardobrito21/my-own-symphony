@@ -153,37 +153,34 @@ maxRetryBackoffMs)`. No randomization — N concurrent failures
 - **Source:** Plan 07 (Claude Agent SDK integration), "Risks
   adopted from SDK research."
 
-### Parent prompt is at ~17k chars; should be compressed
-
-- **What:** `parent-prompt.ts` produces a ~17k-char system
-  prompt per dispatch (up from ~12k pre-Plan-21). Operator
-  flagged it as "enormous" during 21's design discussion;
-  every plan since 18a has added per-stage boilerplate that
-  duplicates across Stages 2-6 (local-\* + namespace-devbox
-  branches written four times each). The dispatch-template
-  explanation block is also longer than it needs to be (the
-  LLM doesn't need to understand WHY `printf` + heredoc
-  works — just to copy the template).
-- **Where:** `packages/daemon/src/agent/pipeline/parent-prompt.ts`
-  (the per-stage sections + the dispatch-template how-it-works
-  block) plus the prompt-size budget assertion in
-  `parent-prompt.test.ts` (currently 19k; should drop with
-  the prompt itself).
-- **Why we accept it:** Token cost is negligible (system
-  prompt is cached after first dispatch). Cost is
-  maintenance surface: when the pipeline shape evolves
-  again, we touch the same boilerplate 4-8x. Compressing it
-  now risks breaking what works — Plan 21's smokes proved
-  the current prompt is Haiku-followable.
-- **Trigger to revisit:** Next plan that adds or removes a
-  stage. Compress before adding to the existing per-stage
-  duplication. Target: collapse Stages 2-6 into one
-  "per-stage dispatch shape" section + a small table of
-  stage-specific inputs. Aim for 8-10k chars total.
-- **Source:** Plan 21 design discussion ("ITS ENORMOUS....
-  must really be this big?") + close-out decision log.
-
 ## Paid
+
+### Parent prompt is at ~17k chars; should be compressed — 2026-05-18
+
+- **What it was:** `parent-prompt.ts` produced a ~17k-char
+  system prompt. Per-stage sections (Stages 2-6 + the four
+  loop sensors inside Stage 4) each repeated a near-identical
+  "For `local-*`: ... For `namespace-devbox`: ..." routing
+  paragraph. Eight copies of the same pattern; ~5k chars of
+  duplication.
+- **How we paid it:** Plan 22 — DRY the parent orchestration
+  prompt. Collapsed the routing description into one
+  "How to dispatch a sub-agent" block after Stage 1; per-stage
+  sections now carry inputs + a one-line description.
+  Trimmed the dispatch-template explainer (~700 → ~200 chars,
+  keeping the secret-hygiene + SYNCHRONOUS warnings),
+  consolidated Stage 7 failure-outcome bullets, and dropped
+  redundant prose between section heading and content.
+- **Result:** ~17k → ~9.6k (null path) / ~10.5k (escalation
+  path). 38-43% reduction. Original target was 8-10k; the
+  achievable size while preserving load-bearing content
+  (loop pseudocode, Step B escalation flow, sub-agent
+  inputs) is ~10.5k. The structural win (one routing block
+  vs eight) is the durable benefit.
+- **Regression guard:** `parent-prompt.test.ts` asserts
+  `For \`local-`/`For \`namespace-devbox\`` do NOT appear
+  per-stage, so the next plan adding a stage can't
+  re-introduce the duplication without tripping the test.
 
 ### Pipeline does not transition Linear issue to In Progress at dispatch time — 2026-05-18
 

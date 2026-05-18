@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: completed
 linear_issue: null
 github_pr: null
 created: 2026-05-18
 updated: 2026-05-18
-closed: null
+closed: 2026-05-18
 ---
 
 # Plan 22 — DRY the parent orchestration prompt
@@ -189,15 +189,15 @@ bearing content of Stage 4.
   `toBeLessThan(10000)`. Update the explanatory comment above
   the assertion.
 - Add a test that pins the compressed structure: count
-  occurrences of `For \`local-` in the prompt; assert ≤ 2
-  (today: 8). Same for `For \`namespace-devbox\``. Regression
+  occurrences of `For \`local-`in the prompt; assert ≤ 2
+(today: 8). Same for`For \`namespace-devbox\``. Regression
   guard against the next plan re-introducing the duplication.
 - The existing "per-stage docs cover BOTH dispatch modes for
   stages 2-6" test (`parent-prompt.test.ts:320`) needs to
   flip. Its old invariant ("each stage section names both
   modes") becomes false-by-design. Replace with: "the routing
   block (read once) covers both modes" — i.e., search for both
-  ``` For `local- ``` and ``` For `namespace-devbox` ``` in the
+  ``For `local-`` and `` For `namespace-devbox` `` in the
   prompt body (anywhere), not per-stage.
 
 Other existing tests (stage ordering, loop algorithm phrases,
@@ -278,3 +278,52 @@ compression and document which sentence was load-bearing.
 - Plan 21's `parent-prompt.test.ts:369-388` already carries
   the TODO comment about compressing post-21 — this plan
   cashes that TODO.
+
+## Decision log
+
+### 2026-05-18 — Implementation landed
+
+- **Structural compression as planned.** The single
+  "How to dispatch a sub-agent" block replaces eight per-stage
+  copies of the local-\* vs namespace-devbox routing prose.
+  Per-stage sections now carry only inputs + a 1-line
+  description. The four loop-step sensors got the same
+  treatment inside Stage 4.
+- **Size: ≤ 10k null path, ≤ 11k escalation path.** Pre-Plan-22
+  was ~17k. The original target was 8-10k; the escalation
+  path (production-configured) lands at ~10.5k because both
+  Step B branches are load-bearing prose. The null-escalation
+  path (legacy) is ~9.6k. Net reduction: 38% on the production
+  path, 43% on the legacy path.
+- **Why we didn't hit 8k.** Cutting further would have meant
+  dropping load-bearing content (loop algorithm pseudocode,
+  Step B escalation flow, sub-agent input lists). Honest
+  budget for the post-22 shape with the current pipeline is
+  ~10-11k. If a future plan adds a stage and pushes past 11k,
+  that's the trigger to re-examine the structure — not to
+  bump the budget.
+- **What got dropped beyond the planned routing cleanup:**
+  - "How the template works" prose (~700 chars) — bash-101
+    explanation of single-quoted heredoc semantics. The
+    template demonstrates it.
+  - Verbose per-sub-agent role descriptions inside Stage 4's
+    loop body (~600 chars) — the SKILL.md prompts already
+    describe each sub-agent's job.
+  - Stage 6's redundant "Skip this stage entirely UNLESS..."
+    paragraph — already in the section heading.
+  - "If a sub-agent returns text that does NOT contain a valid
+    JSON block..." in the Important block — already in the
+    routing section's dispatch-failure rule.
+- **Test changes.**
+  - `per-stage docs cover BOTH dispatch modes for stages 2-6`
+    inverted by design: replaced with a Plan 22 regression
+    guard that asserts `For \`local-`and`For \`namespace-devbox\``
+    do NOT appear (verifying the duplication is gone), while
+    the routing block still mentions both modes.
+  - Size budget assertion now covers both production paths.
+  - Stage heading regex updates (`Stage N — Dispatch @X`
+    → `Stage N — @X`).
+- **No smoke run in this PR.** Plan 22 changed only the prompt
+  text. The next post-merge dispatch exercises it naturally;
+  Plan 21's two smokes (EDU-37 / EDU-38) are the comparable
+  reference if a regression surfaces.

@@ -85,8 +85,8 @@ describe('buildParentPrompt — label surfacing', () => {
       escalationLabel: null,
     });
 
-    const stage1 = prompt.indexOf('## Stage 1 — Dispatch @sandbox');
-    const stage2 = prompt.indexOf('## Stage 2 — Dispatch @planner');
+    const stage1 = prompt.indexOf('## Stage 1 — @sandbox');
+    const stage2 = prompt.indexOf('## Stage 2 — @planner');
     expect(stage1).toBeGreaterThan(0);
     expect(stage2).toBeGreaterThan(stage1);
 
@@ -110,12 +110,12 @@ describe('buildParentPrompt — pipeline shape', () => {
     });
 
     const order = [
-      '## Stage 1 — Dispatch @sandbox',
-      '## Stage 2 — Dispatch @planner',
-      '## Stage 3 — Dispatch @env-up',
+      '## Stage 1 — @sandbox',
+      '## Stage 2 — @planner',
+      '## Stage 3 — @env-up',
       '## Stage 4 — The agentic loop',
-      '## Stage 5 — Dispatch @env-down',
-      '## Stage 6 — Dispatch @ci',
+      '## Stage 5 — @env-down',
+      '## Stage 6 — @ci',
       '## Stage 7 — Close out',
     ];
     let cursor = -1;
@@ -257,7 +257,7 @@ describe('buildParentPrompt — pipeline shape', () => {
     });
 
     const loopStart = prompt.indexOf('## Stage 4 — The agentic loop');
-    const loopEnd = prompt.indexOf('## Stage 5 — Dispatch @env-down');
+    const loopEnd = prompt.indexOf('## Stage 5 — @env-down');
     expect(loopStart).toBeGreaterThan(0);
     expect(loopEnd).toBeGreaterThan(loopStart);
     const loopSection = prompt.slice(loopStart, loopEnd);
@@ -279,7 +279,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       escalationLabel: null,
     });
 
-    expect(prompt).toMatch(/Dispatch routing for Stages 2-6/);
+    expect(prompt).toMatch(/How to dispatch a sub-agent/);
     expect(prompt).toMatch(/kind.*starts with.*local-/i);
     expect(prompt).toMatch(/namespace-devbox/);
     expect(prompt).toMatch(/nsc ssh/);
@@ -317,12 +317,13 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(prompt).toMatch(/do NOT[^.]*(echo|quote|log)/i);
   });
 
-  it('per-stage docs cover BOTH dispatch modes for stages 2-6', () => {
-    // Belt-and-suspenders: each of @planner, @env-up, @env-down,
-    // @ci needs to tell the parent how to dispatch in BOTH the
-    // local and namespace cases. (Loop sensors @coder, @verify,
-    // @code-review, @curator are documented inside Stage 4's loop
-    // body; covered in a separate test.)
+  it('describes both dispatch modes in ONE routing block, not per-stage (Plan 22)', () => {
+    // Plan 22 invariant: the local-* vs namespace-devbox dispatch
+    // choice is documented exactly once, in the "How to dispatch a
+    // sub-agent" section after Stage 1. Per-stage sections (Stages
+    // 2-6 + the four loop-step sensors inside Stage 4) carry inputs
+    // only — no "For `local-*`:" / "For `namespace-devbox`:"
+    // duplication. Regression guard: cap occurrences of each marker.
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -331,21 +332,17 @@ describe('buildParentPrompt — pipeline shape', () => {
       escalationLabel: null,
     });
 
-    for (const stage of [
-      '## Stage 2 — Dispatch @planner',
-      '## Stage 3 — Dispatch @env-up',
-      '## Stage 5 — Dispatch @env-down',
-      '## Stage 6 — Dispatch @ci',
-    ]) {
-      const start = prompt.indexOf(stage);
-      expect(start, `missing ${stage}`).toBeGreaterThan(0);
-      // Find the next "## Stage" header (or end of prompt)
-      const next = prompt.indexOf('## Stage', start + stage.length);
-      const sectionEnd = next === -1 ? prompt.length : next;
-      const section = prompt.slice(start, sectionEnd);
-      expect(section, `${stage} missing local-* branch`).toMatch(/For `?local-/);
-      expect(section, `${stage} missing namespace branch`).toMatch(/For `?namespace-devbox/);
-    }
+    // Both modes still appear in the prompt — just in the routing
+    // block, not per-stage. (Match "**`kind` starts with `local-`**"
+    // and "**`kind` is `namespace-devbox`**".)
+    expect(prompt).toMatch(/`kind` starts with `local-/);
+    expect(prompt).toMatch(/`kind` is `namespace-devbox`/);
+
+    // And the pre-Plan-22 per-stage duplication is GONE: no
+    // "For `local-" / "For `namespace-devbox`" markers should
+    // appear (those headed the per-stage branches before).
+    expect(prompt).not.toMatch(/For `?local-/);
+    expect(prompt).not.toMatch(/For `?namespace-devbox/);
   });
 
   it("does NOT inline any skill body — that's the sub-agents' job now", () => {
@@ -366,25 +363,36 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(prompt).not.toContain('SKILL_DIR=');
   });
 
-  it('parent prompt is meaningfully smaller than the pre-18a inlined version', () => {
-    // Pre-18a `buildPipelinePrompt` produced ~19k chars on a typical
-    // issue. With 18a it dropped to a few thousand. Plans 20 +
-    // 18b/c + 21 each added: @planner (+700), kind-aware routing
-    // (+1.2k), @curator stage + flag rendering (+1.5k), Plan 18c
-    // stdin-heredoc (+700), Plan 21 loop block + env-up/down +
-    // verify + code-review (+5k). Picking 18k as the ceiling —
-    // still under the pre-18a baseline, and a TODO to compress
-    // post-21 (per operator request "this is enormous, can we
-    // shrink it"). If 21's smoke surfaces specific dead weight,
-    // the next iteration tightens.
-    const prompt = buildParentPrompt({
+  it('parent prompt is compressed per Plan 22 (≤ 11k chars on a typical issue)', () => {
+    // Plan 22 (2026-05-18) compressed the prompt by collapsing the
+    // per-stage local-* vs namespace-devbox duplication into a
+    // single "How to dispatch a sub-agent" block and trimming the
+    // dispatch-template explainer. Pre-Plan-22 size was ~17k.
+    //
+    // Two production paths: with-escalation-label (the configured
+    // production case; longer because it carries two Step B
+    // branches) and null-escalation (legacy path; ~9.6k). The
+    // budget here is the with-escalation case (post-22 ~10.5k).
+    // If a future plan adds a stage and bumps this, that's the
+    // trigger to re-examine the structure — not to bump the budget.
+    const promptEscalation = buildParentPrompt({
+      issue: makeIssue({ labels: ['priority:high', 'sandbox:namespace'] }),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      escalationLabel: 'Need Human Help',
+    });
+    expect(promptEscalation.length).toBeLessThan(11000);
+
+    const promptLegacy = buildParentPrompt({
       issue: makeIssue({ labels: ['priority:high', 'sandbox:namespace'] }),
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
       escalationLabel: null,
     });
-    expect(prompt.length).toBeLessThan(19000);
+    // Legacy path is materially smaller (no failure-branch prose).
+    expect(promptLegacy.length).toBeLessThan(10000);
   });
 });
 
