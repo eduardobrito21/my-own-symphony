@@ -60,6 +60,66 @@ describe('evaluateEligibility', () => {
     });
   });
 
+  describe('excluded labels (Plan 21 escalation gate)', () => {
+    it('rejects an issue carrying any excluded label with `excluded_label`', () => {
+      const result = evaluateEligibility(
+        // Labels arrive from the Linear normalizer already lowercased.
+        makeIssue({ labels: ['priority:high', 'need human help'] }),
+        { ...CONFIG, excludedLabels: ['Need Human Help'] },
+      );
+      expect(result).toEqual({ eligible: false, reason: 'excluded_label' });
+    });
+
+    it('matching is case-insensitive on both sides', () => {
+      // Belt-and-suspenders: even if the normalizer ever stops
+      // lowercasing, or operator config uses mixed case, we still
+      // match.
+      const upperLabel = evaluateEligibility(makeIssue({ labels: ['NEED HUMAN HELP'] }), {
+        ...CONFIG,
+        excludedLabels: ['need human help'],
+      });
+      expect(upperLabel.eligible).toBe(false);
+    });
+
+    it('passes when no labels match the excluded list', () => {
+      const result = evaluateEligibility(makeIssue({ labels: ['priority:high', 'namespace'] }), {
+        ...CONFIG,
+        excludedLabels: ['need human help'],
+      });
+      expect(result.eligible).toBe(true);
+    });
+
+    it('passes when the issue has zero labels', () => {
+      const result = evaluateEligibility(makeIssue({ labels: [] }), {
+        ...CONFIG,
+        excludedLabels: ['need human help'],
+      });
+      expect(result.eligible).toBe(true);
+    });
+
+    it('is a no-op when excludedLabels is empty or omitted', () => {
+      const omitted = evaluateEligibility(makeIssue({ labels: ['need human help'] }), CONFIG);
+      expect(omitted.eligible).toBe(true);
+      const empty = evaluateEligibility(makeIssue({ labels: ['need human help'] }), {
+        ...CONFIG,
+        excludedLabels: [],
+      });
+      expect(empty.eligible).toBe(true);
+    });
+
+    it('label exclusion fires AFTER state checks (terminal beats labels)', () => {
+      // An issue in a terminal state with the escalation label
+      // should still surface `state_terminal` as the reason —
+      // state is the earlier check and the operator's mental
+      // model is "terminal first".
+      const result = evaluateEligibility(
+        makeIssue({ state: 'Done', labels: ['need human help'] }),
+        { ...CONFIG, excludedLabels: ['need human help'] },
+      );
+      expect(result).toEqual({ eligible: false, reason: 'state_terminal' });
+    });
+  });
+
   describe('Todo blocker rule (SPEC §8.2)', () => {
     it('skips a Todo with a non-terminal blocker', () => {
       const result = evaluateEligibility(

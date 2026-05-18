@@ -163,6 +163,13 @@ export function buildDeploymentConfigSchema(baseDir: string) {
       terminal_states: z
         .array(z.string().min(1))
         .default(['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done']),
+      // Labels that, when present on an issue, exclude it from
+      // dispatch even if its state is active. Use case: an "escalated
+      // to human" label that Symphony itself adds at close-out when
+      // the loop can't converge (Plan 21). Comparison is
+      // case-insensitive — the Linear normalizer already lowercases
+      // labels; we lowercase configured values to match.
+      excluded_labels: z.array(z.string().min(1)).default([]),
     })
     .strict();
 

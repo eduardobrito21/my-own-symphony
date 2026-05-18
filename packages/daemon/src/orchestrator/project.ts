@@ -45,6 +45,13 @@ export interface ProjectContext {
   /** State names this project treats as terminal (reconcile
    *  terminates the worker; startup sweep removes the workspace). */
   readonly terminalStates: readonly string[];
+  /** Labels (lowercased) that exclude an issue from dispatch even
+   *  when its state is active. Set by the operator in the project's
+   *  `linear.excluded_labels` config. Empty = no label-based
+   *  exclusion. Comparison is case-insensitive (labels arrive from
+   *  the Linear normalizer already lowercased; we expect the
+   *  builder to lowercase configured values before passing here). */
+  readonly excludedLabels: readonly string[];
 }
 
 /** Insertion-ordered map of project contexts. Order is the
@@ -65,12 +72,14 @@ export function singleProjectContext(args: {
   readonly tracker: Tracker;
   readonly activeStates: readonly string[];
   readonly terminalStates: readonly string[];
+  readonly excludedLabels?: readonly string[];
 }): ProjectContextMap {
   const ctx: ProjectContext = {
     key: args.key,
     tracker: args.tracker,
     activeStates: args.activeStates,
     terminalStates: args.terminalStates,
+    excludedLabels: args.excludedLabels ?? [],
   };
   return new Map([[args.key, ctx]]);
 }

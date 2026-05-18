@@ -99,6 +99,10 @@ async function main(): Promise<number> {
       tracker,
       activeStates: entry.linear.active_states,
       terminalStates: entry.linear.terminal_states,
+      // Lowercase here so the eligibility check can do a fast
+      // case-insensitive `Set.has` against `issue.labels` (which
+      // the Linear normalizer already lowercases).
+      excludedLabels: entry.linear.excluded_labels.map((s) => s.toLowerCase()),
     });
     projectDispatch.set(key, {
       repoUrl: entry.repo.url,

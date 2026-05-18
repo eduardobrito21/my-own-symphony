@@ -73,6 +73,20 @@ describe('evaluateRuntimeEligibility', () => {
     expect(result).toEqual({ eligible: false, reason: 'state_terminal' });
   });
 
+  it('passes excludedLabels through to structural — issue with the label is skipped', () => {
+    // Plan 21 escalation: when @curator/@coder/@ci can't make
+    // progress they label the issue and stop. The next tick's
+    // eligibility check must skip it.
+    const state = createInitialState({ pollIntervalMs: 30_000, maxConcurrentAgents: 10 });
+    const result = evaluateRuntimeEligibility(makeIssue({ labels: ['need human help'] }), {
+      state,
+      ...tracker(),
+      excludedLabels: ['need human help'],
+      agent: agent(),
+    });
+    expect(result).toEqual({ eligible: false, reason: 'excluded_label' });
+  });
+
   it('detects already_running', () => {
     const state = createInitialState({ pollIntervalMs: 30_000, maxConcurrentAgents: 10 });
     const issue = makeIssue();
