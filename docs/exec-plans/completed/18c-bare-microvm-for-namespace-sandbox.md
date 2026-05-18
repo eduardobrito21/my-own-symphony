@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-05-17
+updated: 2026-05-17
+closed: 2026-05-17
+---
+
 # Plan 18c — Bare microVM for `@sandbox` (drop the container layer)
 
-- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** A direct simplification of Plan 18b. Same goal
   (sub-agents run in the sandbox they operate on, per ADR 0015) and
   same backend (Namespace), but the per-dispatch environment becomes

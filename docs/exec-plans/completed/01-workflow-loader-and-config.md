@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-28
+updated: 2026-04-28
+closed: 2026-04-28
+---
+
 # Plan 01 — Workflow loader and config layer
 
-- **Status:** Complete
-- **Started:** 2026-04-28
-- **Completed:** 2026-04-28
 - **Spec sections:** §5 (Workflow Specification), §6 (Configuration
   Specification)
 - **Layers touched:** `types/`, `config/`

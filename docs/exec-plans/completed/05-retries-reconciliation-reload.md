@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-29
+updated: 2026-04-29
+closed: 2026-04-29
+---
+
 # Plan 05 — Retries, reconciliation, dynamic reload
 
-- **Status:** Complete
-- **Started:** 2026-04-28
-- **Completed:** 2026-04-28
 - **Spec sections:** §6.2 (Dynamic Reload Semantics), §7.4
   (Idempotency and Recovery Rules), §8.4 (Retry and Backoff), §8.5
   (Active Run Reconciliation), §8.6 (Startup Terminal Workspace

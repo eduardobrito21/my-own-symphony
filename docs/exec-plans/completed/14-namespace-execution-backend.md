@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-30
+updated: 2026-05-16
+closed: 2026-05-16
+---
+
 # Plan 14 — Namespace ExecutionBackend
 
-- **Status:** Withdrawn (2026-05-17) — superseded by Plan 15 / ADR 0014; replaced by Plan 16
 - **New plan.** Created 2026-04-30 after the design discussion
   that produced ADR 0012 (Namespace as the v1 production
   ExecutionBackend).

@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-28
+updated: 2026-04-28
+closed: 2026-04-28
+---
+
 # Plan 03 — Workspace manager
 
-- **Status:** Complete
-- **Started:** 2026-04-28
-- **Completed:** 2026-04-28
 - **Spec sections:** §9 (Workspace Management and Safety), §15.2
   (Filesystem Safety Requirements)
 - **Layers touched:** `workspace/`

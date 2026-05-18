@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-05-17
+updated: 2026-05-17
+closed: 2026-05-17
+---
+
 # Plan 18a — Migrate the pipeline to SDK native sub-agents
 
-- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** A reshape of how Plan 16/17a's pipeline is
   represented to the Claude Agent SDK. Same external behavior
   (same stages, same handoffs); different SDK-level mechanics.

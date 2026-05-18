@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-29
+updated: 2026-04-29
+closed: 2026-04-29
+---
+
 # Plan 08 — HTTP API and Next.js dashboard
 
-- **Status:** ✅ Complete (basic working version per user's "ship fast" directive)
-- **Started:** 2026-04-29
-- **Completed:** 2026-04-29
 - **Spec sections:** §13.7 (Optional HTTP Server Extension)
 - **Layers touched:** `packages/daemon/src/http/` (new),
   `packages/dashboard/` (new top-level package), root scripts

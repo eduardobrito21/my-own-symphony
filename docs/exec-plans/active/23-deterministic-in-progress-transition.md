@@ -1,6 +1,14 @@
+---
+status: proposed
+linear_issue: null
+github_pr: null
+created: 2026-05-18
+updated: 2026-05-18
+closed: null
+---
+
 # Plan 23 — Deterministic Todo → In Progress transition at dispatch time
 
-- **Status:** Not started
 - **Implements:** the tech-debt-tracker entry "Pipeline does
   not transition Linear issue to In Progress at dispatch time"
   (logged during Plan 21 close-out, 2026-05-18). Today an

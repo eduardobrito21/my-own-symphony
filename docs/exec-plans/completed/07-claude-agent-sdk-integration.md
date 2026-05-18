@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-29
+updated: 2026-04-29
+closed: 2026-04-29
+---
+
 # Plan 07 — Claude Agent SDK integration
 
-- **Status:** ✅ Complete 2026-04-29. All 9 steps shipped, four
-  bugs found and fixed across three live smoke runs, multi-turn
-  resume validated end-to-end against EDU-5. Live spend ≈ \$0.20.
 - **Spec sections:** §10 (Agent Runner Protocol — substituted per
   ADR 0001), §15 (Workflow Prompt Rendering)
 - **Layers touched:** `agent/` (new `claude/` adapter), `agent/tools/`

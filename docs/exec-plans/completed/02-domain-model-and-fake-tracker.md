@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-28
+updated: 2026-04-28
+closed: 2026-04-28
+---
+
 # Plan 02 — Domain model and FakeTracker
 
-- **Status:** Complete
-- **Started:** 2026-04-28
-- **Completed:** 2026-04-28
 - **Spec sections:** §4 (Core Domain Model), §11 (Issue Tracker
   Integration Contract)
 - **Layers touched:** `types/`, `tracker/`

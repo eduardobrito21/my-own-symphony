@@ -1,6 +1,14 @@
+---
+status: proposed
+linear_issue: null
+github_pr: null
+created: 2026-05-18
+updated: 2026-05-18
+closed: null
+---
+
 # Plan 22 — DRY the parent orchestration prompt
 
-- **Status:** Not started
 - **Implements:** the tech-debt-tracker entry "Parent prompt is at
   ~17k chars; should be compressed" (logged during Plan 21
   close-out, 2026-05-18). Plan 21 grew the prompt from ~12k to

@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-05-17
+updated: 2026-05-17
+closed: 2026-05-17
+---
+
 # Plan 20 — Pipeline bookends: `@planner`, `@curator`, and exec-plan state
 
-- **Status:** ✅ Complete (2026-05-17, with deferrals — see Decision log)
 - **Implements:** Two new sub-agents that wrap the existing
   `@sandbox → @coder → @ci` pipeline, plus an explicit state
   machine for execution plans so doc-level state stays observable.

@@ -1,6 +1,14 @@
+---
+status: proposed
+linear_issue: null
+github_pr: null
+created: 2026-05-17
+updated: 2026-05-17
+closed: null
+---
+
 # Plan 17b — Private repo support in `@sandbox` (GitHub credentials)
 
-- **Status:** Not started
 - **Implements:** SECURITY.md's existing `GITHUB_TOKEN` slot, which is
   defined but unused. Promotes it to load-bearing for the @sandbox
   skill's clone step.
