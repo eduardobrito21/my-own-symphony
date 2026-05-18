@@ -186,8 +186,8 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(stage3Section).toMatch(/plan_path/);
   });
 
-  it('includes kind-aware dispatch routing for namespace backends (Plan 18b)', () => {
-    // Plan 18b: after @sandbox returns, the parent must branch on
+  it('includes kind-aware dispatch routing for namespace backends', () => {
+    // After @sandbox returns, the parent must branch on
     // SandboxHandle.kind. Local kinds use the Agent tool (Plan 18a
     // path, unchanged); namespace-devbox kinds shell out via Bash
     // to the in-VM wrapper. Both must be documented in the prompt.
@@ -202,8 +202,37 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(prompt).toMatch(/kind.*starts with.*local-/i);
     expect(prompt).toMatch(/namespace-devbox/);
     expect(prompt).toMatch(/nsc ssh/);
-    expect(prompt).toMatch(/--container_name agent/);
     expect(prompt).toMatch(/\/opt\/symphony\/dispatch\.sh/);
+    // Plan 18c — bare microVM: no --container_name anywhere.
+    expect(prompt).not.toMatch(/--container_name/);
+    // Secrets ride stdin: printf assembles env, env vars expand inside
+    // double-quoted printf args.
+    expect(prompt).toMatch(/printf 'ANTHROPIC_API_KEY=/);
+    expect(prompt).toMatch(/"\$ANTHROPIC_API_KEY"/);
+    expect(prompt).toMatch(/"\$GITHUB_TOKEN"/);
+    // Inputs ride stdin: single-quoted heredoc shields user content
+    // (apostrophes, backticks, dollars) from shell parsing.
+    expect(prompt).toMatch(/<<'SYMPHONY_INPUTS_EOF'/);
+    expect(prompt).toMatch(/---SYMPHONY-INPUTS---/);
+    expect(prompt).not.toMatch(/INPUTS_JSON/);
+  });
+
+  it('warns the parent agent NOT to echo secret values (Plan 18c)', () => {
+    // The dispatch template references `$ANTHROPIC_API_KEY` and
+    // `$GITHUB_TOKEN` as literal shell-variable tokens — those
+    // resolve inside the Bash tool's shell, not in the agent's
+    // narrative output. If the agent ever inlines the resolved
+    // values (e.g., to "show" the dispatch command in chat), the
+    // secrets leak. The prompt explicitly forbids it.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+    });
+
+    expect(prompt).toMatch(/secret hygiene/i);
+    expect(prompt).toMatch(/do NOT[^.]*(echo|quote|log)/i);
   });
 
   it('per-stage docs cover BOTH dispatch modes for stages 2-5', () => {
@@ -257,7 +286,8 @@ describe('buildParentPrompt — pipeline shape', () => {
     // Pre-18a `buildPipelinePrompt` produced ~19k chars on a typical
     // issue. With 18a it dropped to a few thousand. Each subsequent
     // plan added a bit: @planner (+700), kind-aware routing (+1.2k),
-    // @curator stage + flag rendering (+1.5k). Picking 11k as the
+    // @curator stage + flag rendering (+1.5k), Plan 18c stdin-heredoc
+    // template + secret-hygiene warning (+700). Picking 12k as the
     // ceiling: still well below the 19k baseline, but tight enough
     // that we notice if a sub-agent prompt starts leaking into the
     // parent again.
@@ -267,7 +297,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
     });
-    expect(prompt.length).toBeLessThan(11000);
+    expect(prompt.length).toBeLessThan(12000);
   });
 });
 

@@ -85,39 +85,54 @@ Rules:
 - The `pino` logger has a `redact` config that masks token-shaped
   values; do not bypass it.
 
-### Plan 18b — Namespace vault for `sandbox:namespace` dispatches
+### Plan 18c — stdin-pipe delivery for `sandbox:namespace` dispatches
 
-For `sandbox:namespace`-labelled dispatches, the daemon's
-`namespace-create.sh` does NOT thread `ANTHROPIC_API_KEY` or
-`GITHUB_TOKEN` from the daemon's env into the sandbox itself.
-Instead, both secrets are stored in the operator's Namespace
-workspace vault (created once via the Namespace UI). At
-dispatch time, the daemon's API call to
-`ComputeService/CreateInstance` declares each container env var
-with `fromSecretId: "sec_..."` pointing at the vault object.
-Namespace's platform resolves and injects the values into the
-agent container's process at start time.
+For `sandbox:namespace`-labelled dispatches the daemon provisions
+a bare Namespace microVM (no container layer, no platform vault
+attachment). Credentials reach the sub-agent over the parent
+agent's `Bash` tool dispatch command, embedded in a heredoc that
+`nsc ssh -T --` forwards as stdin to the in-VM `dispatch.sh`:
+
+    nsc ssh <INSTANCE_ID> -T -- \
+      bash /opt/symphony/dispatch.sh <name> '<inputs>' <<EOF
+    ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+    GITHUB_TOKEN=$GITHUB_TOKEN
+    EOF
+
+`dispatch.sh` drains stdin, exports each `KEY=value` line into the
+script's env, then drops to the non-root `symphony` user (via
+`su -p`) before invoking `claude`. The same stdin-pipe pattern is
+used at provision time when `namespace-create.sh` ships
+`GITHUB_TOKEN` to the in-VM `clone-and-checkout.sh` for the
+initial clone.
 
 Properties:
 
 - Neither secret is ever written to the daemon's filesystem.
-- Neither secret is on any `nsc` argv (vault refs are by id).
-- Neither secret appears in daemon logs from the dispatch.
-- The microVM's filesystem never sees a credentials file
-  (`/opt/symphony/env` does NOT exist; the container's env
-  vars come from the platform, not from a sourced file).
-- The agent container's `env` shows both vars; an agent inside
-  the container CAN read them via `$ANTHROPIC_API_KEY` etc.
-  (this is by design — `claude` needs to authenticate).
+- Neither secret is ever written to the microVM's filesystem.
+- Neither secret is on `nsc ssh`'s argv (they ride the SSH stdin
+  channel, which is a stream, not an argv slot).
+- Neither secret appears in daemon logs from the dispatch (the
+  parent agent's prompt explicitly forbids echoing or quoting the
+  resolved values; the heredoc references them as literal shell
+  tokens `$ANTHROPIC_API_KEY` / `$GITHUB_TOKEN` that resolve only
+  inside the `Bash` tool's runtime).
+- The agent inside the microVM CAN read them via `$ANTHROPIC_API_KEY`
+  etc. — this is by design (claude needs to authenticate, @ci
+  needs to push).
 
-Operator threat-model note: anyone with `nsc auth` access to
-the workspace can read the vault values via the
-`VaultService.DescribeObject` API on revealable secrets.
-Symphony's daemon assumes this — secrets in the workspace
-vault are operator-trust-equivalent.
+The microVM is single-tenant per dispatch and destroyed when the
+pipeline ends (or when its TTL expires). The secret-exposure
+window is the lifetime of one dispatch.
 
-For `local-*` dispatches the original env-var inheritance model
-(daemon's env → agent's env) applies unchanged.
+Operator threat-model note: anyone with `nsc auth` access to the
+workspace can `nsc ssh` into a live dispatch's microVM and read
+`/proc/<pid>/environ` of the running `claude` process while a
+sub-agent is executing. Symphony's daemon assumes operator-equivalent
+trust for everyone with `nsc auth` access to the workspace.
+
+For `local-*` dispatches the daemon-env → agent-env inheritance
+model applies unchanged.
 
 ## Filesystem invariants
 
