@@ -18,6 +18,11 @@ import { isStateAmong } from './state-matching.js';
 export interface EligibilityConfig {
   readonly activeStates: readonly string[];
   readonly terminalStates: readonly string[];
+  /** Labels (case-insensitive) that exclude an issue from dispatch.
+   *  Compared against `issue.labels`, which the Linear normalizer
+   *  already lowercases. Configured values are lowercased here so
+   *  operator config can use any case. */
+  readonly excludedLabels?: readonly string[];
 }
 
 /**
@@ -32,7 +37,8 @@ export type IneligibilityReason =
   | 'missing_required_field'
   | 'state_not_active'
   | 'state_terminal'
-  | 'todo_with_non_terminal_blocker';
+  | 'todo_with_non_terminal_blocker'
+  | 'excluded_label';
 
 /**
  * Evaluate whether `issue` passes the structural checks in SPEC §8.2.
@@ -55,6 +61,19 @@ export function evaluateEligibility(issue: Issue, config: EligibilityConfig): El
 
   if (!isStateAmong(issue.state, config.activeStates)) {
     return { eligible: false, reason: 'state_not_active' };
+  }
+
+  // Label-based exclusion. Use case (Plan 21): an operator-named
+  // "Need Human Help" label that Symphony itself stamps when the
+  // loop can't converge — keeps the dispatcher from re-picking up
+  // an issue that's waiting on a human.
+  if (config.excludedLabels !== undefined && config.excludedLabels.length > 0) {
+    const excludedLowered = new Set(config.excludedLabels.map((s) => s.toLowerCase()));
+    for (const label of issue.labels) {
+      if (excludedLowered.has(label.toLowerCase())) {
+        return { eligible: false, reason: 'excluded_label' };
+      }
+    }
   }
 
   if (isTodoState(issue.state) && hasNonTerminalBlocker(issue, config.terminalStates)) {

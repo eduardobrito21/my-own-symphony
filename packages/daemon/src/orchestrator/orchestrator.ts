@@ -256,6 +256,7 @@ export class Orchestrator {
         state: this.state,
         activeStates: ctx.activeStates,
         terminalStates: ctx.terminalStates,
+        excludedLabels: ctx.excludedLabels,
         agent: this.config.agent,
       });
       if (!eligibility.eligible) {
@@ -668,6 +669,7 @@ export class Orchestrator {
         state: this.state,
         activeStates: ctx.activeStates,
         terminalStates: ctx.terminalStates,
+        excludedLabels: ctx.excludedLabels,
         agent: this.config.agent,
       });
       if (eligibility.eligible) {

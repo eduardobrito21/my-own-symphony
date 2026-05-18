@@ -46,6 +46,9 @@ export interface RuntimeEligibilityArgs {
   /** Per-project terminal states (Plan 09c). Was previously
    *  `tracker.terminal_states` from the single ServiceConfig. */
   readonly terminalStates: readonly string[];
+  /** Per-project excluded labels (Plan 21 escalation gate). Issues
+   *  carrying any of these labels are skipped at dispatch time. */
+  readonly excludedLabels?: readonly string[];
   readonly agent: AgentConfig;
 }
 
@@ -65,6 +68,7 @@ export function evaluateRuntimeEligibility(
   const structural = evaluateEligibility(issue, {
     activeStates: args.activeStates,
     terminalStates: args.terminalStates,
+    ...(args.excludedLabels !== undefined && { excludedLabels: args.excludedLabels }),
   });
   if (!structural.eligible) {
     return liftStructural(structural);

@@ -42,6 +42,13 @@ projects:
       project_slug: a532c6a9e9bb
       active_states: [Todo, 'In Progress']
       terminal_states: [Done, Cancelled, Canceled, Duplicate]
+      # Labels that exclude an issue from dispatch, even when its
+      # state is active. Symphony itself stamps these when the
+      # pipeline can't make progress (Plan 21 escalation): the
+      # parent posts a Linear comment with the failure reason and
+      # adds the label. The next poll tick skips the issue,
+      # leaving it for a human to inspect.
+      excluded_labels: ['need human help']
     repo:
       url: https://github.com/eduardobrito21/my-own-symphony-test.git
       default_branch: main
