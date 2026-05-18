@@ -57,6 +57,36 @@ Look at `sandbox_handle.kind`:
   can't complete the change confidently, fail with
   `changed_files: []` and a clear `summary` explaining the gap.
 
+## Step 0 — Read the target repo's coding conventions (if present)
+
+Before you read the issue, check the worktree for target-repo-
+authored guidance. Three locations matter:
+
+- `<worktree_path>/.claude/rules/*.md` — coding rules the target
+  repo's operator wants enforced. Things like "use functional
+  style", "prefer explicit return types", "do not use `any`".
+- `<worktree_path>/.claude/skills/*.md` — task-specific
+  playbooks the target repo provides. E.g. a skill on how to
+  add a new API route, or how to wire up a migration.
+- `<worktree_path>/CLAUDE.md` — repo-level instructions (the
+  Claude Code convention). May reference architecture decisions,
+  preferred libraries, or repo-specific gotchas.
+
+For each present file: **read it**, treat it as authoritative
+guidance that supplements (and where it conflicts, overrides)
+this skill's generic recipes. They're how the target operator
+told Claude how to code against their codebase.
+
+A target repo with none of these files is fine — fall through
+to Step 1.
+
+> **Why this matters:** Symphony runs `claude --bare` (no auto-
+> CLAUDE.md discovery, for safety). That means YOU have to read
+> these files explicitly — they won't be loaded automatically.
+> A skipped `.claude/rules/` is invisible until it causes a code-
+> review flag two stages later; reading them upfront avoids the
+> rework.
+
 ## Step 1 — Read the description
 
 `cat` (or `Read`) the issue description from the inputs above.
