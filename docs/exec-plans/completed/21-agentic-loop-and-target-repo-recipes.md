@@ -1,6 +1,6 @@
 # Plan 21 — Agentic loop, target-repo recipes, escalation integration
 
-- **Status:** Not started
+- **Status:** ✅ Complete (2026-05-18)
 - **Implements:** The iterating sensor loop that turns Symphony
   from a one-shot pipeline (one `@coder` pass, ship it) into an
   agentic system that converges on a working PR through
@@ -509,3 +509,95 @@ because the plan starts with these assumptions baked in.
   agnostic about the sandbox; same loop runs in any sandbox  
   flavor that gives us root + docker (which today is only  
   `namespace-devbox` per Plan 18c, but the loop is portable).
+
+### 2026-05-18 — Plan close-out
+
+Shipped via PR #39. Two live smokes validated both halves of
+the loop's exit grid end-to-end.
+
+| Smoke | Issue                                              | Loop outcome                                                                                  | Time                                                                | Artifact                                                                                                    |
+| ----- | -------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| A     | EDU-37 — append a smoke-named HTML comment         | `coder_gave_up` after 2 iters (conflict between issue text and @code-review scar-tissue flag) | ~4m                                                                 | Need-Human-Help label added; state stayed Todo                                                              |
+| B     | EDU-38 — add a horizontal rule before contributors | `converged` on iter 1 (all sensors clean)                                                     | ~7m (with one @coder-was-backgrounded incident; ~3.5m steady-state) | [target PR #11](https://github.com/eduardobrito21/my-own-symphony-test/pull/11); state transitioned to Done |
+
+What both smokes proved live:
+
+- The 4 new sub-agents (`@env-up`, `@env-down`, `@verify`,
+  `@code-review`) build correctly, dispatch via the existing
+  stdin-heredoc template, and return well-formed JSON results.
+- The loop algorithm (init → per-iter → continue check) is
+  followable by Haiku-4.5; the parent agent correctly:
+  - Identifies the iter-1 / iter-N split for `@coder`'s
+    `changed_files: []` interpretation (no_changes vs
+    coder_gave_up).
+  - Computes the loop-continue check (fingerprint vs cap-3
+    vs no_progress).
+  - Hands off to `@env-down` after every loop exit (success
+    or failure).
+  - Gates `@ci` on `outcome === "converged"`.
+- The escalation path (PR #37 filter + PR #38 close-out
+  label-add) reuses without modification — EDU-37's
+  `coder_gave_up` routed cleanly through it, label added,
+  state preserved, daemon's filter blocked re-dispatch.
+
+Smoke-discovered bugs (fixed in the same PR #39):
+
+1. **`@coder` ran with `run_in_background: true`** by the
+   parent's Bash tool — EDU-38 iter 1 entered a polling
+   death-spiral that recovered after ~80s but burned tokens.
+   Root cause: the SDK's Bash tool sees a 75-second dispatch
+   command and the agent reasoned it must be a long-running
+   task. Fix: explicit prompt block in `parent-prompt.ts`
+   declaring the dispatch SYNCHRONOUS, do NOT background.
+
+2. **Target-repo `.claude/` convention discovered**. User
+   insight mid-smoke: when `@coder` runs inside a target
+   repo, it should pick up that repo's `.claude/rules/*.md`
+   - `.claude/skills/*.md` (the standard Claude Code
+     convention) just like `claude` itself does. Symphony
+     runs `claude --bare` so these aren't auto-discovered;
+     added a Step 0 to `@coder.SKILL.md` and a scope-rule
+     addition to `@code-review.SKILL.md` to read them
+     explicitly. Not smoke-exercised (no target repo with
+     `.claude/` exists in our test fixtures yet); convention
+     is documented and the agents will read the files when
+     present.
+
+What was deferred:
+
+- **Prompt-size compression.** 21's loop block pushed the
+  parent prompt to ~17k chars. The size-budget test was
+  bumped 12k → 19k as a known TODO. Operator flagged the
+  prompt as "enormous" during 21's design discussion; a
+  separate plan should tighten it (collapse per-stage
+  boilerplate, table-ify inputs, trim the dispatch-
+  template explanation). Tech-debt entry added in this
+  plan's close-out PR.
+- **`.symphony/recipes.yaml` happy-path smoke.** Both
+  smokes ran against a target repo with no recipes;
+  sensors all skipped correctly. A future smoke against a
+  real `.symphony/recipes.yaml` (with real `env_up`,
+  `verify` commands, etc.) will exercise the
+  recipes-present branch end-to-end. Defer to the first
+  real fullstack-repo dispatch.
+- **Deterministic Todo → In Progress transition.** During
+  21's smokes, issues stay in Todo state throughout the
+  pipeline (the agent only transitions on close-out). The
+  operator-side state visibility is misleading. Identified
+  as a clean follow-up (small daemon-side change: hook a
+  `tracker.transitionIssueState(id, 'In Progress')` call
+  before `dispatchOne` fires). Out of 21's scope; will
+  ship as a separate PR.
+
+What 21 deliberately does NOT change:
+
+- The sandbox provider (still bare microVM per 18c).
+- The 6 pre-21 sub-agent contracts (sandbox, planner,
+  coder, curator, ci, plus the unchanged close-out flow).
+- The escalation transport (still PR #37/#38).
+
+The loop is now the load-bearing surface for everything
+agentic. Future plans add capability AT this surface (a
+real `@tester`, AWS sandbox, parallelized sensors) without
+having to re-litigate the iteration / convergence / cap /
+escalation algorithm.
