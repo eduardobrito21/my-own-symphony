@@ -92,6 +92,39 @@ export interface FetchByIdsArgs {
   readonly ids: readonly IssueId[];
 }
 
+export interface TransitionIssueStateArgs {
+  readonly issueId: IssueId;
+  /** Operator-configured target state name (e.g. "In Progress").
+   *  Resolved against the issue's team's workflow states with
+   *  case-insensitive matching. */
+  readonly targetStateName: string;
+}
+
+/**
+ * Outcome of a state-transition attempt. Three variants:
+ *
+ *   - `transitioned` — the issue was moved from one state to another.
+ *   - `noop`         — the issue was already in the target state;
+ *                      no mutation issued.
+ *   - `skipped`      — the target state name did not match any state
+ *                      in the issue's team; nothing was mutated. The
+ *                      caller's responsibility to log + surface the
+ *                      operator misconfiguration; the daemon should
+ *                      proceed with dispatch regardless.
+ */
+export type TransitionOutcome =
+  | { readonly kind: 'transitioned'; readonly fromStateName: string; readonly toStateName: string }
+  | {
+      readonly kind: 'noop';
+      readonly reason: 'already-in-target-state';
+      readonly currentStateName: string;
+    }
+  | {
+      readonly kind: 'skipped';
+      readonly reason: 'target-state-not-found';
+      readonly available: readonly string[];
+    };
+
 /**
  * Issue-tracker adapter. SPEC §11.1.
  *
@@ -124,4 +157,16 @@ export interface Tracker {
    * not re-fetched.
    */
   fetchIssueStatesByIds(args: FetchByIdsArgs): Promise<TrackerResult<readonly Issue[]>>;
+
+  /**
+   * Transition one issue to a target workflow state (Plan 23). Used
+   * by the orchestrator to mark issues as "In Progress" at dispatch
+   * time so the Linear dashboard reflects in-flight work. Returns a
+   * structured outcome — see `TransitionOutcome`. Idempotent: a
+   * `kind: 'noop'` is returned (no API mutation issued) when the
+   * issue is already in the target state. Resolution of
+   * `targetStateName` against the team's workflow states is
+   * case-insensitive.
+   */
+  transitionIssueState(args: TransitionIssueStateArgs): Promise<TrackerResult<TransitionOutcome>>;
 }

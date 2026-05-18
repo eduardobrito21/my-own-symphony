@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: completed
 linear_issue: null
 github_pr: null
 created: 2026-05-18
 updated: 2026-05-18
-closed: null
+closed: 2026-05-18
 ---
 
 # Plan 23 — Deterministic Todo → In Progress transition at dispatch time
@@ -194,7 +194,7 @@ Three new artifacts in
      `current.name.toLowerCase() === target.toLowerCase()`,
      return `kind: 'noop'`.
   4. Otherwise call `issueUpdate(id: $issueId, input:
-     { stateId: $stateId })`, validate the response, return
+{ stateId: $stateId })`, validate the response, return
      `kind: 'transitioned'`.
 
 Cap the call at the existing client-wide timeout (no new
@@ -396,3 +396,63 @@ log lines from Stage 23-5 will say why.
 - Plan 06 (real Linear adapter) — establishes the existing
   read-only client + zod-validated response pattern that
   Stage 23-2 extends to mutations.
+
+## Decision log
+
+### 2026-05-18 — Implementation landed; what changed from the spec
+
+- **No separate `runMutation` client method.** Stage 23-2's
+  text floated promoting `LinearClient` to "read+write" with
+  a dedicated mutation method. The existing `execute<TVars>`
+  is already operation-agnostic (a mutation is just a
+  different GraphQL operation string) — adding a parallel
+  method would have been duplication without observable
+  benefit. The adapter passes both queries and the new
+  `IssueUpdateState` mutation through `client.execute`.
+- **One round-trip for lookup, not two.** The spec sketched a
+  separate "fetch issue's current state" step and a
+  "fetch team's workflow states" step. The implementation
+  collapses both into `ISSUE_WORKFLOW_STATES_QUERY`
+  (`issue(id) { state team { states } }`) so the noop
+  short-circuit at the adapter level costs one API call,
+  not two.
+- **Idempotency lives in two places — the orchestrator AND
+  the adapter.** The orchestrator pre-checks `issue.state`
+  against `ctx.inProgressState` (case-insensitive) and skips
+  the call entirely when they match — that's the common case
+  on re-dispatch. The adapter STILL re-checks the current
+  state (against the freshly fetched `issue.state`) and
+  returns `kind: 'noop'` if it matches — this catches the
+  race where the orchestrator's pre-fetched state is stale
+  but the dashboard already shows the right state. Belt and
+  suspenders, but cheap.
+- **No startup-time validation that `in_progress_state` is in
+  `active_states`.** Considered, deferred. The default
+  configuration (`'In Progress'` ∈ `['Todo', 'In Progress']`)
+  works out of the box; misconfigurations manifest as
+  `kind: 'skipped'` log lines on first dispatch, which is
+  loud enough. Adding startup validation would mean
+  enumerating workflow states per project at boot — extra
+  GraphQL surface for a guard that doesn't pay yet.
+- **No smoke run in this PR.** Plan 23's DoD calls for one
+  real-Linear dispatch demonstrating the transition. That
+  smoke fires naturally on the next post-merge dispatch
+  (the new field has a default; existing `symphony.yaml`
+  works without changes). The log line
+  `in_progress_transition` with `outcome.kind:
+'transitioned'` is the success signal.
+
+### 2026-05-18 — Tests landed
+
+- 5 new fake-tracker tests (transition variants + call log +
+  result queue).
+- 7 new LinearTracker tests (mocked client; covers
+  transitioned / noop / skipped / case-insensitive lookup /
+  null-issue + success: false + transport error).
+- 6 new orchestrator tests (Plan 23 file): call-once,
+  configurable target state, idempotent pre-check
+  (case-sensitive + insensitive), non-blocking on error,
+  non-blocking on skipped.
+- One new deployment-config test pinning the
+  `in_progress_state` default + custom-override.
+- All 425 tests pass; typecheck + lint clean.

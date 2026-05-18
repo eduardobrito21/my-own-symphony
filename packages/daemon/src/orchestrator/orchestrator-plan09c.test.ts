@@ -82,13 +82,20 @@ function buildConfig(workspaceRoot: string): ServiceConfig {
 function ctx(
   key: string,
   tracker: Tracker,
-  opts: { activeStates?: readonly string[]; terminalStates?: readonly string[] } = {},
+  opts: {
+    activeStates?: readonly string[];
+    terminalStates?: readonly string[];
+    excludedLabels?: readonly string[];
+    inProgressState?: string;
+  } = {},
 ): ProjectContext {
   return {
     key: ProjectKey(key),
     tracker,
     activeStates: opts.activeStates ?? ['Todo', 'In Progress'],
     terminalStates: opts.terminalStates ?? ['Done', 'Cancelled'],
+    excludedLabels: opts.excludedLabels ?? [],
+    inProgressState: opts.inProgressState ?? 'In Progress',
   };
 }
 
@@ -224,6 +231,11 @@ describe('Orchestrator — Plan 09c multi-project', () => {
         } satisfies TrackerResult<readonly Issue[]>),
       fetchIssuesByStates: () => Promise.resolve({ ok: true, value: [] }),
       fetchIssueStatesByIds: () => Promise.resolve({ ok: true, value: [] }),
+      transitionIssueState: () =>
+        Promise.resolve({
+          ok: true,
+          value: { kind: 'noop', reason: 'already-in-target-state', currentStateName: 'Todo' },
+        }),
     };
     const trackerB = new FakeTracker([makeIssue('b-1', 'MKT-B1')]);
     const projects = multiProjectMap(ctx('edu', failingTracker), ctx('mkt', trackerB));

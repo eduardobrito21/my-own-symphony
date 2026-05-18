@@ -86,6 +86,101 @@ describe('FakeTracker', () => {
     });
   });
 
+  describe('transitionIssueState (Plan 23)', () => {
+    it('transitions an issue and reports the from/to state names', async () => {
+      const tracker = new FakeTracker([makeIssue({ id: IssueId('a'), state: 'Todo' })]);
+      const result = await tracker.transitionIssueState({
+        issueId: IssueId('a'),
+        targetStateName: 'In Progress',
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          kind: 'transitioned',
+          fromStateName: 'Todo',
+          toStateName: 'In Progress',
+        });
+      }
+      expect(tracker.getIssue(IssueId('a'))?.state).toBe('In Progress');
+    });
+
+    it('returns noop without mutating when already in the target state (case-insensitive)', async () => {
+      const tracker = new FakeTracker([makeIssue({ id: IssueId('a'), state: 'IN PROGRESS' })]);
+      const result = await tracker.transitionIssueState({
+        issueId: IssueId('a'),
+        targetStateName: 'In Progress',
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          kind: 'noop',
+          reason: 'already-in-target-state',
+          currentStateName: 'IN PROGRESS',
+        });
+      }
+      // Casing preserved — noop does not normalize the existing state.
+      expect(tracker.getIssue(IssueId('a'))?.state).toBe('IN PROGRESS');
+    });
+
+    it('returns skipped when the target name is not in availableStates', async () => {
+      const tracker = new FakeTracker([makeIssue({ id: IssueId('a'), state: 'Todo' })], {
+        availableStates: ['Todo', 'Doing', 'Done'],
+      });
+      const result = await tracker.transitionIssueState({
+        issueId: IssueId('a'),
+        targetStateName: 'In Progress',
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toEqual({
+          kind: 'skipped',
+          reason: 'target-state-not-found',
+          available: ['Todo', 'Doing', 'Done'],
+        });
+      }
+      // Skipped means no mutation.
+      expect(tracker.getIssue(IssueId('a'))?.state).toBe('Todo');
+    });
+
+    it('records every call in transitionCalls in invocation order', async () => {
+      const tracker = new FakeTracker([
+        makeIssue({ id: IssueId('a'), state: 'Todo' }),
+        makeIssue({ id: IssueId('b'), state: 'Todo' }),
+      ]);
+      await tracker.transitionIssueState({
+        issueId: IssueId('a'),
+        targetStateName: 'In Progress',
+      });
+      await tracker.transitionIssueState({
+        issueId: IssueId('b'),
+        targetStateName: 'In Progress',
+      });
+      expect(tracker.transitionCalls.map((c) => c.issueId)).toEqual(['a', 'b']);
+    });
+
+    it('queueTransitionResult overrides the next call and is consumed once', async () => {
+      const tracker = new FakeTracker([makeIssue({ id: IssueId('a'), state: 'Todo' })]);
+      tracker.queueTransitionResult({
+        ok: false,
+        error: { code: 'linear_api_request', message: 'simulated', cause: new Error('boom') },
+      });
+      const first = await tracker.transitionIssueState({
+        issueId: IssueId('a'),
+        targetStateName: 'In Progress',
+      });
+      expect(first.ok).toBe(false);
+      // Issue state was NOT mutated by the simulated-failure path.
+      expect(tracker.getIssue(IssueId('a'))?.state).toBe('Todo');
+      // Second call returns to default behavior — transitions normally.
+      const second = await tracker.transitionIssueState({
+        issueId: IssueId('a'),
+        targetStateName: 'In Progress',
+      });
+      expect(second.ok).toBe(true);
+      expect(tracker.getIssue(IssueId('a'))?.state).toBe('In Progress');
+    });
+  });
+
   describe('mutators', () => {
     it('setIssueState updates one issue and leaves the rest untouched', () => {
       const tracker = new FakeTracker([

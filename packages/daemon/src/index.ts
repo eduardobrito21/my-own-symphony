@@ -103,6 +103,7 @@ async function main(): Promise<number> {
       // case-insensitive `Set.has` against `issue.labels` (which
       // the Linear normalizer already lowercases).
       excludedLabels: entry.linear.excluded_labels.map((s) => s.toLowerCase()),
+      inProgressState: entry.linear.in_progress_state,
     });
     projectDispatch.set(key, {
       repoUrl: entry.repo.url,
