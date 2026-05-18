@@ -28,6 +28,19 @@ export interface ProjectDispatchInfo {
   readonly repoUrl: string;
   readonly defaultBranch: string;
   readonly branchPrefix: string;
+  /**
+   * Escalation label name (Plan 21). When the pipeline fails, the
+   * parent agent's close-out adds this label to the issue instead of
+   * transitioning to Done — the orchestrator's next-tick filter
+   * (`linear.excluded_labels`) then skips the issue, leaving it
+   * visible to a human as still-active-but-flagged. Sourced from
+   * the project's `linear.excluded_labels[0]` to keep the loop
+   * closed (filter + label-add reference the same name).
+   *
+   * `null` = no escalation label configured; close-out falls back
+   * to the legacy "transition to Done on failure" behavior.
+   */
+  readonly escalationLabel: string | null;
 }
 
 /**
@@ -158,6 +171,7 @@ export class PipelineAgentRunner implements AgentRunner {
       repoUrl: dispatchInfo.repoUrl,
       defaultBranch: dispatchInfo.defaultBranch,
       branchPrefix: dispatchInfo.branchPrefix,
+      escalationLabel: dispatchInfo.escalationLabel,
     });
     const subAgents = buildSubAgents(skills);
 

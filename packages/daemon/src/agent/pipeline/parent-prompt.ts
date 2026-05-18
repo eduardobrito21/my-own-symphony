@@ -17,6 +17,20 @@ export interface ParentPromptContext {
   readonly repoUrl: string;
   readonly defaultBranch: string;
   readonly branchPrefix: string;
+  /**
+   * The escalation label name (e.g. "Need Human Help"). When set,
+   * pipeline failures take the **escalation** close-out branch: add
+   * this label to the issue + post the failure comment + leave the
+   * issue state unchanged. The orchestrator's tick filter (Plan 21,
+   * `linear.excluded_labels`) then skips the issue on subsequent
+   * polls, leaving it visible to a human as still-active-but-flagged.
+   * Sourced from the project's `linear.excluded_labels[0]` (matches
+   * the filter's first entry so the loop closes).
+   *
+   * `null` = legacy behavior: failures transition to Done with a
+   * "pipeline failed" comment.
+   */
+  readonly escalationLabel: string | null;
 }
 
 /**
@@ -25,7 +39,7 @@ export interface ParentPromptContext {
  * markdowns live in the sub-agent definitions, not here.
  */
 export function buildParentPrompt(context: ParentPromptContext): string {
-  const { issue, repoUrl, defaultBranch, branchPrefix } = context;
+  const { issue, repoUrl, defaultBranch, branchPrefix, escalationLabel } = context;
   const branchName = `${branchPrefix}${issue.identifier}`;
   const labelLine = issue.labels.length === 0 ? '(none)' : issue.labels.join(', ');
 
@@ -297,21 +311,74 @@ export function buildParentPrompt(context: ParentPromptContext): string {
     `Include the marker \`<!-- symphony:completed issue=${issue.identifier} -->\``,
     'in the comment body so re-dispatches can detect prior completion.',
     '',
-    '1. Post the comment via `linear_graphql`:',
+    '### Step A — post the comment (both outcomes)',
+    '',
+    'Post via `linear_graphql`:',
     '',
     '       commentCreate(input: {',
     `         issueId: "${issue.id}",`,
     '         body: "..."',
     '       })',
     '',
-    '2. Find the `Done` workflow state and transition the issue:',
-    '',
-    '       workflowStates(filter: {',
-    `         team: { issues: { id: { eq: "${issue.id}" } } }`,
-    '       })',
-    '       # then',
-    `       issueUpdate(id: "${issue.id}", input: { stateId: "<done_state_id>" })`,
-    '',
+    ...(escalationLabel === null
+      ? [
+          '### Step B — transition to `Done` (no escalation label configured)',
+          '',
+          'Find the `Done` workflow state and transition the issue:',
+          '',
+          '       workflowStates(filter: {',
+          `         team: { issues: { id: { eq: "${issue.id}" } } }`,
+          '       })',
+          '       # then',
+          `       issueUpdate(id: "${issue.id}", input: { stateId: "<done_state_id>" })`,
+          '',
+        ]
+      : [
+          '### Step B — success outcomes: transition to `Done`',
+          '',
+          'Only run this branch for **success outcomes** (@ci ran',
+          'and opened a PR, OR @coder skipped cleanly). Find the',
+          '`Done` workflow state and transition:',
+          '',
+          '       workflowStates(filter: {',
+          `         team: { issues: { id: { eq: "${issue.id}" } } }`,
+          '       })',
+          '       # then',
+          `       issueUpdate(id: "${issue.id}", input: { stateId: "<done_state_id>" })`,
+          '',
+          `### Step B — failure outcomes: add the \`${escalationLabel}\` label`,
+          '',
+          'Only run this branch for **failure outcomes** (any stage',
+          'returned an error or a `kind: "failed"` SandboxHandle).',
+          'Do NOT transition the issue state — the issue stays in',
+          'its current state (typically `In Progress`), visible to a',
+          "human as still-active-but-flagged. The daemon's next poll",
+          `tick sees the \`${escalationLabel}\` label and skips the`,
+          '   issue with reason `excluded_label`, leaving it for a',
+          'human to inspect.',
+          '',
+          'Step 1: look up the label id by name. Each Linear team',
+          "has its own label set, so first get the issue's team:",
+          '',
+          `       issue(id: "${issue.id}") { team { id } }`,
+          "       # then list that team's labels and find the match:",
+          '       team(id: "<team_id>") {',
+          '         labels(first: 200) { nodes { id name } }',
+          '       }',
+          `       # find the node whose name (case-insensitive) === "${escalationLabel}"`,
+          '',
+          'Step 2: attach the label:',
+          '',
+          `       issueAddLabel(id: "${issue.id}", labelId: "<label_id>")`,
+          '',
+          'If the label-lookup returns nothing (operator never',
+          'created the label, or renamed it without updating',
+          '`symphony.yaml`), FALL BACK to transitioning the issue to',
+          "`Done` so it doesn't stay stuck `In Progress` forever.",
+          'Note the fallback in the comment body so the operator can',
+          'fix the config.',
+          '',
+        ]),
     '## Important',
     '',
     '- Do NOT use `Read`, `Edit`, `Write`, `Glob`, `Grep` yourself.',

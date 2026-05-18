@@ -108,6 +108,14 @@ async function main(): Promise<number> {
       repoUrl: entry.repo.url,
       defaultBranch: entry.repo.default_branch,
       branchPrefix: entry.repo.branch_prefix,
+      // First entry of excluded_labels is the escalation label —
+      // the close-out flow adds this label to the issue on failure
+      // and the next poll's filter sees it and skips. Same name on
+      // both sides of the loop, single source of truth: symphony.yaml.
+      // Preserve the operator's original casing (not lowercased) so
+      // the label that gets added to Linear matches what they see in
+      // the UI; the filter normalizes on its side.
+      escalationLabel: entry.linear.excluded_labels[0] ?? null,
     });
     logger.info('project ready', {
       project_key: key,
