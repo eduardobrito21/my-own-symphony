@@ -125,5 +125,5 @@ The split criteria for "when do we actually do this":
 ## Schedule
 
 This decision is paired with
-[Plan 13](../exec-plans/active/13-deployable-services-and-v1-polish.md),
+[Plan 13](../exec-plans/completed/13-deployable-services-and-v1-polish.md),
 which is where the split actually happens.

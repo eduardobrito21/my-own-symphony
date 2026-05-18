@@ -130,7 +130,7 @@ breakdown the dashboard renders. The `symphony.yaml` schema is
 implemented and parsed (Plan 09 stage 09b). The composition
 root still runs in single-project compat mode at runtime;
 multi-project YAML wiring at startup happens alongside the pod
-runtime in [Plan 10](../exec-plans/active/10-agent-in-pod-runtime.md).
+runtime in [Plan 10](../exec-plans/completed/10-agent-in-pod-runtime.md).
 Per-repo `<repo>/.symphony/workflow.md` is loaded **by the pod**
 after the clone (Plan 10) — the daemon never reads it directly.
 
