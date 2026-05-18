@@ -384,7 +384,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       branchPrefix: 'symphony/',
       escalationLabel: null,
     });
-    expect(prompt.length).toBeLessThan(18000);
+    expect(prompt.length).toBeLessThan(19000);
   });
 });
 

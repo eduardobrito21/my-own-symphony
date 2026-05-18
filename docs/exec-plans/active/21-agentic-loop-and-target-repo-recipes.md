@@ -123,7 +123,7 @@ Three motivations, priority order:
   No single sensor catches everything; together they cover the
   space.
 
-3. **Symphony stops needing operator-monitoring.** Combined with
+1. **Symphony stops needing operator-monitoring.** Combined with
    PR #37 + #38: convergence + escalation means every dispatch
    either lands a PR or flags itself for a human. The operator's
    loop becomes "look at the Linear board once a day; PRs to
@@ -136,7 +136,7 @@ Three motivations, priority order:
 - **Custom microVM image** with claude + repo deps pre-baked.
   Defer until Plan 21's smoke gives us a real cold-start
   number to argue from.
-- `**@tester` sub-agent.\*\* `@verify` here is mechanical — it
+- `**@tester` sub-agent. `@verify` here is mechanical — it
   runs the configured test command and parses pass/fail.
   `@tester` (a hypothetical future sub-agent) would diagnose
   WHY tests fail and propose fixes that touch test code itself.
@@ -150,7 +150,7 @@ Three motivations, priority order:
   principle run in parallel since they don't share state, but
   the parent agent's accumulated-findings model is simpler
   serial. Revisit if total loop time matters.
-- `**@code-review` getting Write/Edit access.\*\* Propose-only in
+- `**@code-review` getting Write/Edit access. Propose-only in
   v1. The flag includes a `suggested_fix` patch; `@coder`
   applies it on the next loop iter. Auto-fix lives behind a
   future trust-building plan.
@@ -182,11 +182,11 @@ to call.
 - No autodetect, no defaults. The operator declares
   explicitly what to run.
 
-2. **Loader location.** Doesn't need a TS-side loader. The
+1. **Loader location.** Doesn't need a TS-side loader. The
    sub-agents that consume recipes (env-up/env-down/verify)
    each read `<worktree>/.symphony/recipes.yaml` themselves via
    the `Read` tool. Decoupled from the daemon's bootstrap.
-3. **Provision-time check.** `namespace-create.sh` after the
+2. **Provision-time check.** `namespace-create.sh` after the
    clone: stat `<worktree>/.symphony/recipes.yaml`. If absent,
    log a warning at provision time so the operator knows
    sensors will skip. NOT pipeline-blocking — a repo with no
@@ -195,7 +195,7 @@ to call.
 - @ci` (just no env-up / verify / code-review can be
   automatic).
 
-4. **Documentation.** New section in `packages/daemon/src/skills/sandbox/SKILL.md`
+1. **Documentation.** New section in `packages/daemon/src/skills/sandbox/SKILL.md`
    (or a new top-level `TARGET_REPO_HARNESS.md`) describing the
    convention. Operator-facing.
 
@@ -205,7 +205,7 @@ Two new script-driven sub-agents that run target-repo-owned
 scripts. Same shape as `@sandbox`: deterministic, structured
 output.
 
-1. `**packages/daemon/src/skills/env-up/SKILL.md`:\*\*
+1. `**packages/daemon/src/skills/env-up/SKILL.md`:
 
 - Read `<worktree_path>/.symphony/recipes.yaml`.
 - If `env_up` is missing or the recipes file doesn't exist:
@@ -219,7 +219,7 @@ output.
 
 stderr_tail: '<last 50 lines>', duration_seconds: N }`.
 
-1. `**@env-down`:\*\* mirror image. Run after the loop exits
+1. `**@env-down`: mirror image. Run after the loop exits
    (success OR escalation) and before close-out, so the target
    repo's services tear down regardless of outcome.
 2. **Tool scoping.** `Bash` + `Read` only. No Write, no Edit —
@@ -230,7 +230,7 @@ stderr_tail: '<last 50 lines>', duration_seconds: N }`.
   `SUB_AGENT_NAMES`, the iteration array in `buildSubAgents`.
 - `dispatch.sh`: validation case + ALLOWED_TOOLS case.
 
-4. **Schemas.** New `EnvUpResultSchema` and `EnvDownResultSchema`
+1. **Schemas.** New `EnvUpResultSchema` and `EnvDownResultSchema`
    in `agent/skills/schemas.ts`. Shape above.
 
 ### Stage 21-3 — `@verify` sub-agent
@@ -238,7 +238,7 @@ stderr_tail: '<last 50 lines>', duration_seconds: N }`.
 The mechanical loop sensor. Aggregates typecheck + lint + tests
 into one pass/fail.
 
-1. `**packages/daemon/src/skills/verify/SKILL.md`:\*\*
+1. `**packages/daemon/src/skills/verify/SKILL.md`:
 
 - Read `<worktree_path>/.symphony/recipes.yaml`.
 - Run `typecheck`, then `lint`, then `test` (in that order).
@@ -263,7 +263,7 @@ string[] }`.
 The judgement loop sensor. LLM-driven; flag-only with proposed
 patches.
 
-1. `**packages/daemon/src/skills/code-review/SKILL.md`:\*\*
+1. `**packages/daemon/src/skills/code-review/SKILL.md`:
 
 - Read the files in `changed_files` (passed in inputs).
 - For each, look for:
@@ -280,7 +280,7 @@ patches.
 - Return `CodeReviewResult: { decision: 'audited' | 'skipped',
 
 summary: string, flags: Flag[] }`where each`Flag`is` { rule: string, file: string, line?: number, concern:
-string, suggested_fix: string }`. `**suggested_fix`is a      PATCH the next`@coder`iter can apply, not free-form prose.** E.g.:`"replace lines 42-44 of foo.ts with: "`.
+string, suggested_fix: string }`.` **suggested_fix`is a      PATCH the next`@coder`iter can apply, not free-form prose.** E.g.:`"replace lines 42-44 of foo.ts with: "`.
 
 1. **Discipline.** Curator-style:
 
@@ -291,9 +291,9 @@ string, suggested_fix: string }`. `**suggested_fix`is a      PATCH the next`@cod
 - If no findings, return `decision: 'audited', flags: []` —
   don't pad.
 
-2. **Tool scoping.** `Bash` (read-only operations: `git diff`,
+1. **Tool scoping.** `Bash` (read-only operations: `git diff`,
    `find`, etc.), `Read`, `Glob`, `Grep`. NO Edit / Write.
-3. **Plumbing.** Same as 21-2/3.
+2. **Plumbing.** Same as 21-2/3.
 
 ### Stage 21-5 — Loop wiring in parent-prompt + close-out integration
 
@@ -319,18 +319,18 @@ the escalation hand-off for loop-exit-without-convergence.
 
 rule)` tuples across all flags + verify's failed_step.
 
-1. `**@coder` re-invocation per iter.\*\* Each loop iter
+1. `**@coder` re-invocation per iter. Each loop iter
    re-dispatches `@coder` with the accumulated findings:
 
 - "Previous iteration's findings: . Address each. Do
   not re-introduce the change that caused them."
 
-2. **Cost tracking.** SDK emits per-turn `usage` events with
+1. **Cost tracking.** SDK emits per-turn `usage` events with
    `total_cost_usd`. Parent agent reads these (via the
    `Bash`-tool-output structured fields, or via the
    `task_notification` channel) and accumulates. If cumulative
    > $5 at any iteration boundary, exit loop with BUDGET hit.
-3. **No-progress detection algorithm.**
+2. **No-progress detection algorithm.**
 
 - After each iter, compute the fingerprint.
 - Compare to the previous iter's fingerprint.
@@ -338,13 +338,13 @@ rule)` tuples across all flags + verify's failed_step.
   escalate. The next iter would just produce the same flags.
 - First iter has no previous; never escalates on iter 1.
 
-4. **Close-out failure branch (already shipped, PR #38).** Loop
+1. **Close-out failure branch (already shipped, PR #38).** Loop
    exit failure (any of cap / budget / no-progress) goes to the
    existing failure path: post comment with the loop summary
    (iteration count, cost, remaining flags), add the
    Need-Human-Help label, do NOT transition state. The
    daemon's filter (PR #37) skips on next tick.
-5. `**@ci` scope reduction.\*\* `@ci` today is already
+2. `**@ci` scope reduction. `@ci` today is already
    commit-and-PR-only — its SKILL.md doesn't make judgement
    calls. No change needed except possibly cosmetic
    re-affirmation.
@@ -364,7 +364,7 @@ rule)` tuples across all flags + verify's failed_step.
   fails on the first `@coder` attempt but is fixable in one
   `@coder` iteration.
 
-2. **Smoke 1 — convergence.** Dispatch the bug-fix issue. Expect:
+1. **Smoke 1 — convergence.** Dispatch the bug-fix issue. Expect:
 
 - `@coder` iter 1 makes a change.
 - `@verify` fails (test failure).
@@ -374,7 +374,7 @@ rule)` tuples across all flags + verify's failed_step.
 - Loop exits CONVERGE.
 - `@env-down` runs. `@ci` opens PR. Close-out → Done.
 
-3. **Smoke 2 — cap hit.** Dispatch a "contrived non-converging"
+1. **Smoke 2 — cap hit.** Dispatch a "contrived non-converging"
    issue: e.g., a description that asks for something
    physically impossible, or that triggers a flag the @coder
    can't address (style preference disagreement). Expect:
@@ -386,7 +386,7 @@ rule)` tuples across all flags + verify's failed_step.
   added, state untouched.
 - Next daemon tick: `skip ... reason=excluded_label`.
 
-4. **Cost log.** Capture cumulative token cost per dispatch.
+1. **Cost log.** Capture cumulative token cost per dispatch.
    Convergence smoke is the baseline; cap smoke is the worst
    case. Both should be well under $5.
 
@@ -432,7 +432,7 @@ tech-debt tracker if they have a concrete trigger condition.
   instead (e.g., "move to Needs Review state, don't add a
   label"), that's a separate plan — labels are the simpler
   contract.
-- `**@code-review`'s reading surface.\*\* v1 reads only files in
+- `**@code-review`'s reading surface. v1 reads only files in
   `changed_files` plus the top-level concern docs it detects.
   Could expand to "files the diff touches via imports" but
   that's open-ended — start narrow.
@@ -453,7 +453,7 @@ Captured from the multi-turn design conversation. Pre-execution
 because the plan starts with these assumptions baked in.
 
 - `**@verify` = one sub-agent aggregating typecheck / lint /
-  tests\*\* (sequential, stop on first failure) instead of
+  tests (sequential, stop on first failure) instead of
   separate `@typecheck`, `@lint`, `@tests`. Operator's call.
   Reasoning: same operational shape (run command, parse exit
   code), the loop is simpler with fewer sensor boundaries.
@@ -491,24 +491,21 @@ because the plan starts with these assumptions baked in.
   shipped 2026-05-17. The loop's cap / budget / no-progress
   exit paths all hand off to the same close-out failure
   branch — no new escalation transport.
-- `**@code-review` is propose-only, no auto-edit.\*\*
+- `**@code-review` is propose-only, no auto-edit.
   Operator's call. Reasoning: trust isn't earned yet. The
   flag's `suggested_fix` is a literal patch that the next
   `@coder` iter applies; `@code-review` itself never
   modifies code. Mirrors `@curator`'s discipline (curator's
   Rule 1 auto-fixes a narrow set; rules 2+ are flag-only).
   Auto-fix in `@code-review` lives behind a future plan.
-- `**@tester` is NOT part of Plan 21.\*\* What 21 ships as
+- `**@tester` is NOT part of Plan 21. What 21 ships as
   `@verify` is the mechanical "run the test command, did it
   pass?" sensor. A hypothetical `@tester` would diagnose
   WHY tests fail and propose fixes that touch test code
   itself. That's a separate plan; the loop bounces back to
   `@coder` for now and trusts `@coder` to update tests when
   it's appropriate.
-- **AWS sandbox kind is a separate plan.** Plan 21 is shape
-  agnostic about the san
--
--
-- dbox; same loop runs in any sandbox
-  flavor that gives us root + docker (which today is only
+- **AWS sandbox kind is a separate plan.** Plan 21 is shape  
+  agnostic about the sandbox; same loop runs in any sandbox  
+  flavor that gives us root + docker (which today is only  
   `namespace-devbox` per Plan 18c, but the loop is portable).

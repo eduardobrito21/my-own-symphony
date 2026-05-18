@@ -37,6 +37,20 @@ You audit:
   `QUALITY_SCORE.md`, `PRODUCT_SENSE.md`, `DESIGN.md`, etc.
   Read them ONCE at the start; cross-reference against the
   changes.
+- Target-repo coding rules in `<worktree_path>/.claude/rules/*.md`,
+  if present. These are the conventions the target operator
+  wants enforced when claude touches this codebase ("use
+  functional style", "prefer explicit return types", etc.).
+  Read every file in that dir once. They feed Rule 3
+  (principle adherence) alongside the top-level concern docs —
+  same shape, narrower vocabulary.
+
+Optionally helpful but not required:
+
+- `<worktree_path>/.claude/skills/*.md` — task-specific
+  playbooks the target repo authored. Usually @coder's
+  concern, not yours; only consult if a `suggested_fix` you're
+  about to propose conflicts with one of these skills.
 
 You do **NOT**:
 
