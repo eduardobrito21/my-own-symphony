@@ -96,11 +96,11 @@ describe('buildParentPrompt — label surfacing', () => {
 });
 
 describe('buildParentPrompt — pipeline shape', () => {
-  // The parent prompt pins the 6-stage shape (Plan 20 added @planner
-  // between @sandbox and @coder, then @curator between @coder and
-  // @ci) so future plans don't accidentally drop or reorder stages.
+  // The parent prompt pins the 7-stage shape (Plan 21 added
+  // @env-up + the agentic loop + @env-down + @ci-conditional) so
+  // future plans don't accidentally drop or reorder stages.
 
-  it('emits the six stages in order', () => {
+  it('emits the seven stages in order', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -112,10 +112,11 @@ describe('buildParentPrompt — pipeline shape', () => {
     const order = [
       '## Stage 1 — Dispatch @sandbox',
       '## Stage 2 — Dispatch @planner',
-      '## Stage 3 — Dispatch @coder',
-      '## Stage 4 — Dispatch @curator',
-      '## Stage 5 — Dispatch @ci',
-      '## Stage 6 — Close out',
+      '## Stage 3 — Dispatch @env-up',
+      '## Stage 4 — The agentic loop',
+      '## Stage 5 — Dispatch @env-down',
+      '## Stage 6 — Dispatch @ci',
+      '## Stage 7 — Close out',
     ];
     let cursor = -1;
     for (const heading of order) {
@@ -128,7 +129,7 @@ describe('buildParentPrompt — pipeline shape', () => {
     }
   });
 
-  it('tells the agent to skip Stages 4 and 5 when @coder returned no changed files', () => {
+  it('Stage 4 documents the loop algorithm with cap + no-progress checks', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -137,14 +138,17 @@ describe('buildParentPrompt — pipeline shape', () => {
       escalationLabel: null,
     });
 
-    // Both @curator (Stage 4) and @ci (Stage 5) must be skipped on a
-    // no-op @coder run — curator has nothing to audit, @ci has
-    // nothing to commit.
-    expect(prompt).toMatch(/skip[^\n]*Stages? 4(?:\s*and\s*5)?/i);
-    expect(prompt).toMatch(/empty[^\n]*changed_files|changed_files[^\n]*empty/i);
+    // The loop must declare its exit conditions explicitly.
+    expect(prompt).toMatch(/converged/);
+    expect(prompt).toMatch(/cap_hit|cap hit|iter == 3/i);
+    expect(prompt).toMatch(/no_progress|no progress/i);
+    expect(prompt).toMatch(/fingerprint/);
+    // And the iteration mechanic — @coder is re-dispatched with
+    // previous-iter findings.
+    expect(prompt).toMatch(/previous_findings/);
   });
 
-  it('renders the issue URL in the header so Stage 6 can reference it', () => {
+  it('renders the issue URL in the header so Stage 7 can reference it', () => {
     const prompt = buildParentPrompt({
       issue: makeIssue({ url: 'https://linear.app/example/issue/EDU-77' }),
       repoUrl: 'https://github.com/example/repo.git',
@@ -169,7 +173,8 @@ describe('buildParentPrompt — pipeline shape', () => {
     });
 
     expect(prompt).toMatch(/Curator findings/);
-    expect(prompt).toMatch(/CuratorResult\.flags/);
+    // Plan 21: also renders code-review flags in the close-out.
+    expect(prompt).toMatch(/Code review findings/);
     expect(prompt).toMatch(/auto_fixes[^.]*do not include/i);
   });
 
@@ -238,11 +243,11 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(prompt).not.toMatch(/Need Human Help/);
   });
 
-  it('threads plan_path from PlannerResult into the @coder dispatch', () => {
+  it('threads plan_path from PlannerResult into the @coder dispatch (inside the loop)', () => {
     // Plan 20: @planner runs before @coder and may produce a plan
-    // file. The parent prompt must instruct itself to pass plan_path
-    // through to @coder so the coder reads the plan as its
-    // authoritative instruction.
+    // file. Plan 21: @coder is now inside the loop. The parent
+    // prompt's @coder dispatch (within Stage 4's loop body) must
+    // mention plan_path so the agent threads it in on each iter.
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -251,12 +256,14 @@ describe('buildParentPrompt — pipeline shape', () => {
       escalationLabel: null,
     });
 
-    const stage3 = prompt.indexOf('## Stage 3 — Dispatch @coder');
-    const stage4 = prompt.indexOf('## Stage 4 — Dispatch @curator');
-    expect(stage3).toBeGreaterThan(0);
-    expect(stage4).toBeGreaterThan(stage3);
-    const stage3Section = prompt.slice(stage3, stage4);
-    expect(stage3Section).toMatch(/plan_path/);
+    const loopStart = prompt.indexOf('## Stage 4 — The agentic loop');
+    const loopEnd = prompt.indexOf('## Stage 5 — Dispatch @env-down');
+    expect(loopStart).toBeGreaterThan(0);
+    expect(loopEnd).toBeGreaterThan(loopStart);
+    const loopSection = prompt.slice(loopStart, loopEnd);
+    expect(loopSection).toMatch(/plan_path/);
+    // And the @coder dispatch shape should reference PlannerResult.
+    expect(loopSection).toMatch(/PlannerResult\.plan_path/);
   });
 
   it('includes kind-aware dispatch routing for namespace backends', () => {
@@ -272,7 +279,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       escalationLabel: null,
     });
 
-    expect(prompt).toMatch(/Dispatch routing for Stages 2-5/);
+    expect(prompt).toMatch(/Dispatch routing for Stages 2-6/);
     expect(prompt).toMatch(/kind.*starts with.*local-/i);
     expect(prompt).toMatch(/namespace-devbox/);
     expect(prompt).toMatch(/nsc ssh/);
@@ -310,12 +317,12 @@ describe('buildParentPrompt — pipeline shape', () => {
     expect(prompt).toMatch(/do NOT[^.]*(echo|quote|log)/i);
   });
 
-  it('per-stage docs cover BOTH dispatch modes for stages 2-5', () => {
-    // Belt-and-suspenders: each of @planner, @coder, @curator, @ci
-    // needs to tell the parent how to dispatch in BOTH the local
-    // and namespace cases. If a stage forgets to mention the remote
-    // path, the agent falls back to Agent tool for that stage
-    // even on namespace dispatches and the call fails silently.
+  it('per-stage docs cover BOTH dispatch modes for stages 2-6', () => {
+    // Belt-and-suspenders: each of @planner, @env-up, @env-down,
+    // @ci needs to tell the parent how to dispatch in BOTH the
+    // local and namespace cases. (Loop sensors @coder, @verify,
+    // @code-review, @curator are documented inside Stage 4's loop
+    // body; covered in a separate test.)
     const prompt = buildParentPrompt({
       issue: makeIssue(),
       repoUrl: 'https://github.com/example/repo.git',
@@ -326,9 +333,9 @@ describe('buildParentPrompt — pipeline shape', () => {
 
     for (const stage of [
       '## Stage 2 — Dispatch @planner',
-      '## Stage 3 — Dispatch @coder',
-      '## Stage 4 — Dispatch @curator',
-      '## Stage 5 — Dispatch @ci',
+      '## Stage 3 — Dispatch @env-up',
+      '## Stage 5 — Dispatch @env-down',
+      '## Stage 6 — Dispatch @ci',
     ]) {
       const start = prompt.indexOf(stage);
       expect(start, `missing ${stage}`).toBeGreaterThan(0);
@@ -361,13 +368,15 @@ describe('buildParentPrompt — pipeline shape', () => {
 
   it('parent prompt is meaningfully smaller than the pre-18a inlined version', () => {
     // Pre-18a `buildPipelinePrompt` produced ~19k chars on a typical
-    // issue. With 18a it dropped to a few thousand. Each subsequent
-    // plan added a bit: @planner (+700), kind-aware routing (+1.2k),
-    // @curator stage + flag rendering (+1.5k), Plan 18c stdin-heredoc
-    // template + secret-hygiene warning (+700). Picking 12k as the
-    // ceiling: still well below the 19k baseline, but tight enough
-    // that we notice if a sub-agent prompt starts leaking into the
-    // parent again.
+    // issue. With 18a it dropped to a few thousand. Plans 20 +
+    // 18b/c + 21 each added: @planner (+700), kind-aware routing
+    // (+1.2k), @curator stage + flag rendering (+1.5k), Plan 18c
+    // stdin-heredoc (+700), Plan 21 loop block + env-up/down +
+    // verify + code-review (+5k). Picking 18k as the ceiling —
+    // still under the pre-18a baseline, and a TODO to compress
+    // post-21 (per operator request "this is enormous, can we
+    // shrink it"). If 21's smoke surfaces specific dead weight,
+    // the next iteration tightens.
     const prompt = buildParentPrompt({
       issue: makeIssue({ labels: ['priority:high', 'sandbox:namespace'] }),
       repoUrl: 'https://github.com/example/repo.git',
@@ -375,7 +384,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       branchPrefix: 'symphony/',
       escalationLabel: null,
     });
-    expect(prompt.length).toBeLessThan(12000);
+    expect(prompt.length).toBeLessThan(18000);
   });
 });
 

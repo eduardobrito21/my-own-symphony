@@ -26,7 +26,15 @@ import type { SkillDefinition } from '../skills/index.js';
 const SUB_AGENT_TOOLS = {
   sandbox: ['Bash', 'Read'] as const,
   planner: ['Bash', 'Read', 'Write', 'Glob', 'Grep'] as const,
+  // Plan 21 mechanical sensors. Bash + Read only — they invoke
+  // operator-declared scripts; they don't edit code.
+  'env-up': ['Bash', 'Read'] as const,
+  'env-down': ['Bash', 'Read'] as const,
+  verify: ['Bash', 'Read'] as const,
   coder: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const,
+  // Plan 21 judgement sensor. Read/Glob/Grep + Bash (for git diff,
+  // gh issue view); no Write/Edit — propose-only.
+  'code-review': ['Bash', 'Read', 'Glob', 'Grep'] as const,
   curator: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const,
   ci: ['Bash', 'Read'] as const,
 } as const;
@@ -42,8 +50,16 @@ const SUB_AGENT_DESCRIPTIONS = {
     'Provisions a development environment for the current issue (clones the repo, starts services or microVM as needed) and returns a SandboxHandle JSON.',
   planner:
     'Reads the issue and decides whether it warrants a written execution plan. If yes, writes one to docs/exec-plans/active/ in the worktree. Returns a PlannerResult JSON with decision (planned|skipped), reason, and plan_path.',
+  'env-up':
+    "Plan 21 mechanical sensor. Runs the target repo's `env_up` recipe (from .symphony/recipes.yaml) to boot dev services (docker compose up, seed db, etc.). Returns an EnvUpResult JSON. Skipped when the recipe is missing.",
+  'env-down':
+    "Plan 21 mechanical sensor. Runs the target repo's `env_down` recipe to tear down dev services. Mirror image of @env-up; same EnvUpResult-shaped JSON. Always invoked after the loop exits (success or escalation).",
   coder:
     'Reads the issue description and makes the requested code change inside the sandbox worktree. Returns a CoderResult JSON listing changed files plus a summary.',
+  verify:
+    "Plan 21 mechanical sensor. Runs the target repo's typecheck / lint / test recipes in order, stops on first failure. Returns a VerifyResult JSON with pass/fail + the failed step's output tail.",
+  'code-review':
+    "Plan 21 judgement sensor. Audits the changeset for scar tissue, comment quality, principle violations against the target's concern docs (SECURITY.md etc.), and obvious code smells. Propose-only — flags carry suggested patches the next @coder iteration applies. Returns a CodeReviewResult JSON.",
   curator:
     "Audits the documentation harness (AGENTS.md, docs/ tree, exec-plans, indexes, top-level concern docs) for graph-integrity drift introduced by the coder's changeset. Auto-fixes mechanical drift; flags judgement-required findings. Returns a CuratorResult JSON.",
   ci: 'Commits the changes the coder made, pushes the branch to origin, and opens (or reuses) a GitHub PR. Returns a CIResult JSON with the PR URL.',
@@ -83,7 +99,17 @@ export function buildSubAgents(
   skills: Map<string, SkillDefinition>,
 ): Record<string, AgentDefinition> {
   const result: Record<string, AgentDefinition> = {};
-  for (const name of ['sandbox', 'planner', 'coder', 'curator', 'ci'] as const) {
+  for (const name of [
+    'sandbox',
+    'planner',
+    'env-up',
+    'coder',
+    'verify',
+    'code-review',
+    'curator',
+    'env-down',
+    'ci',
+  ] as const) {
     const skill = skills.get(name);
     const description = SUB_AGENT_DESCRIPTIONS[name];
     const tools = [...SUB_AGENT_TOOLS[name]];
@@ -103,5 +129,15 @@ export function buildSubAgents(
  * Names this module knows how to build sub-agents for. Useful for
  * tests + the runner's REQUIRED_SKILLS list.
  */
-export const SUB_AGENT_NAMES = ['sandbox', 'planner', 'coder', 'curator', 'ci'] as const;
+export const SUB_AGENT_NAMES = [
+  'sandbox',
+  'planner',
+  'env-up',
+  'coder',
+  'verify',
+  'code-review',
+  'curator',
+  'env-down',
+  'ci',
+] as const;
 export type SubAgentName = (typeof SUB_AGENT_NAMES)[number];

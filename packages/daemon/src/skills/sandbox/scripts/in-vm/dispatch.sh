@@ -69,6 +69,7 @@ SUBAGENT="$1"
 # daemon (Plan 18b Decision 8), never in the VM.
 case "$SUBAGENT" in
   planner | coder | curator | ci) ;;
+  env-up | env-down | verify | code-review) ;; # Plan 21 sensors
   sandbox) die "@sandbox runs in the daemon, not the sandbox" ;;
   *) die "unknown sub-agent: $SUBAGENT" ;;
 esac
@@ -119,6 +120,10 @@ case "$SUBAGENT" in
   coder) ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep" ;;
   curator) ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep" ;;
   ci) ALLOWED_TOOLS="Bash,Read" ;;
+  env-up) ALLOWED_TOOLS="Bash,Read" ;;
+  env-down) ALLOWED_TOOLS="Bash,Read" ;;
+  verify) ALLOWED_TOOLS="Bash,Read" ;;
+  code-review) ALLOWED_TOOLS="Bash,Read,Glob,Grep" ;;
 esac
 
 # User prompt: a small framing line + the inputs body the parent

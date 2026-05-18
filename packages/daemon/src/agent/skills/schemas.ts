@@ -231,3 +231,133 @@ export function parseCIResult(input: unknown): CIResult {
 export function safeParseCIResult(input: unknown): z.SafeParseReturnType<unknown, CIResult> {
   return CIResultSchema.safeParse(input);
 }
+
+// ---------------------------------------------------------------------------
+// EnvUpResult / EnvDownResult — Plan 21 mechanical sensors
+// ---------------------------------------------------------------------------
+
+/**
+ * Output of `@env-up` (and same shape for `@env-down`). Both
+ * sensors invoke a target-repo-owned script read from
+ * `<worktree>/.symphony/recipes.yaml`.
+ *
+ * `skipped: true` means the recipe key was missing — not an error,
+ * just nothing to do. The pipeline continues; downstream sensors
+ * that need a running env will fail predictably and the loop's
+ * escalation handles them.
+ *
+ * On run: `succeeded` is the script's exit-0 status; `stderr_tail`
+ * is the last ~50 lines of stderr captured for debugging (the
+ * agent surfaces it on failure into the Linear comment).
+ */
+export const EnvUpResultSchema = z.object({
+  skipped: z.boolean(),
+  succeeded: z.boolean().optional(),
+  stderr_tail: z.string().optional(),
+  duration_seconds: z.number().optional(),
+  reason: z.string().optional(),
+});
+
+export type EnvUpResult = z.infer<typeof EnvUpResultSchema>;
+
+export function parseEnvUpResult(input: unknown): EnvUpResult {
+  return EnvUpResultSchema.parse(input);
+}
+
+export function safeParseEnvUpResult(input: unknown): z.SafeParseReturnType<unknown, EnvUpResult> {
+  return EnvUpResultSchema.safeParse(input);
+}
+
+// `@env-down` uses the identical shape. Aliased for clarity at
+// call sites — the schema is the same.
+export const EnvDownResultSchema = EnvUpResultSchema;
+export type EnvDownResult = EnvUpResult;
+
+// ---------------------------------------------------------------------------
+// VerifyResult — Plan 21 mechanical sensor
+// ---------------------------------------------------------------------------
+
+/**
+ * Output of `@verify`. Aggregates the target repo's typecheck +
+ * lint + test commands (read from `.symphony/recipes.yaml`) into a
+ * single pass/fail. Runs steps in order; stops on first failure.
+ *
+ * `passed === true` means every present recipe step succeeded.
+ * Missing recipe keys are recorded in `skipped_steps` (not flagged
+ * as failures — the operator opted out of that step for this repo).
+ *
+ * On failure: `failed_step` names which step bailed, and
+ * `output_tail` carries the last ~100 lines of stderr+stdout so
+ * the parent agent can pass it to the next `@coder` iteration.
+ */
+export const VerifyResultSchema = z.object({
+  passed: z.boolean(),
+  failed_step: z.enum(['typecheck', 'lint', 'test']).nullable(),
+  output_tail: z.string().optional(),
+  skipped_steps: z.array(z.enum(['typecheck', 'lint', 'test'])),
+});
+
+export type VerifyResult = z.infer<typeof VerifyResultSchema>;
+
+export function parseVerifyResult(input: unknown): VerifyResult {
+  return VerifyResultSchema.parse(input);
+}
+
+export function safeParseVerifyResult(
+  input: unknown,
+): z.SafeParseReturnType<unknown, VerifyResult> {
+  return VerifyResultSchema.safeParse(input);
+}
+
+// ---------------------------------------------------------------------------
+// CodeReviewResult — Plan 21 judgement sensor
+// ---------------------------------------------------------------------------
+
+/**
+ * One flagged finding from `@code-review`. Same general shape as
+ * `CuratorFlag` (rule / file / line? / concern / suggested_fix)
+ * but the rules describe different concerns: comment quality,
+ * scar tissue, code smells, principle adherence against the
+ * target repo's top-level concern docs (SECURITY.md, etc.).
+ *
+ * `suggested_fix` is a literal patch the next `@coder` iteration
+ * applies — not free-form prose. E.g. "replace lines 42-44 of
+ * foo.ts with: <three-line block>".
+ */
+export const CodeReviewFlagSchema = z.object({
+  rule: z.string().min(1),
+  file: z.string().min(1),
+  line: z.number().int().positive().optional(),
+  concern: z.string().min(1),
+  suggested_fix: z.string().min(1),
+});
+
+export type CodeReviewFlag = z.infer<typeof CodeReviewFlagSchema>;
+
+/**
+ * Output of `@code-review`. Propose-only — `@code-review` itself
+ * never edits files; `flags` carry the patches that the next
+ * `@coder` loop iteration applies.
+ *
+ * `decision: 'skipped'` means no changed files were
+ * code-review-relevant (e.g., the changeset was a pure docs
+ * commit or empty). `decision: 'audited'` means review ran;
+ * `flags: []` is the clean case.
+ */
+export const CodeReviewResultSchema = z.object({
+  decision: z.enum(['audited', 'skipped']),
+  summary: z.string().min(1),
+  flags: z.array(CodeReviewFlagSchema),
+});
+
+export type CodeReviewResult = z.infer<typeof CodeReviewResultSchema>;
+
+export function parseCodeReviewResult(input: unknown): CodeReviewResult {
+  return CodeReviewResultSchema.parse(input);
+}
+
+export function safeParseCodeReviewResult(
+  input: unknown,
+): z.SafeParseReturnType<unknown, CodeReviewResult> {
+  return CodeReviewResultSchema.safeParse(input);
+}
