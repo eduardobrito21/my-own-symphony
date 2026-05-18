@@ -31,6 +31,27 @@ describe('buildDeploymentConfigSchema', () => {
     expect(config.projects[0]?.repo.default_branch).toBe('main');
     expect(config.projects[0]?.repo.workflow_path).toBe('.symphony/workflow.md');
     expect(config.projects[0]?.repo.branch_prefix).toBe('symphony/');
+    // Plan 23: in_progress_state defaults to "In Progress" when omitted.
+    expect(config.projects[0]?.linear.in_progress_state).toBe('In Progress');
+  });
+
+  it('accepts a custom linear.in_progress_state per project (Plan 23)', () => {
+    const schema = buildDeploymentConfigSchema('/tmp/dep');
+    const result = schema.safeParse({
+      projects: [
+        {
+          linear: {
+            project_slug: 'team-a',
+            active_states: ['Todo', 'Doing'],
+            in_progress_state: 'Doing',
+          },
+          repo: { url: 'https://github.com/o/r.git' },
+        },
+      ],
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.projects[0]?.linear.in_progress_state).toBe('Doing');
   });
 
   it('parses a multi-project deployment with overrides', () => {

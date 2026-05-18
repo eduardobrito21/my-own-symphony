@@ -123,3 +123,36 @@ export const IssueStatesByIdsDataSchema = z.object({
     nodes: z.array(MinimalIssueSchema),
   }),
 });
+
+// ---- transition issue state (Plan 23) -------------------------------
+
+export const IssueWorkflowStatesDataSchema = z.object({
+  issue: z
+    .object({
+      id: z.string().min(1),
+      state: StateRefSchema,
+      team: z.object({
+        states: z.object({
+          nodes: z.array(
+            z.object({
+              id: z.string().min(1),
+              name: z.string().min(1),
+            }),
+          ),
+        }),
+      }),
+    })
+    .nullable(),
+});
+
+export const IssueUpdateStateDataSchema = z.object({
+  issueUpdate: z.object({
+    success: z.boolean(),
+    issue: z
+      .object({
+        id: z.string().min(1),
+        state: StateRefSchema,
+      })
+      .nullable(),
+  }),
+});

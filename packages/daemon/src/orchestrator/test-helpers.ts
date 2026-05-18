@@ -33,6 +33,7 @@ export function defaultProjects(
   opts: {
     readonly activeStates?: readonly string[];
     readonly terminalStates?: readonly string[];
+    readonly inProgressState?: string;
   } = {},
 ): ProjectContextMap {
   return singleProjectContext({
@@ -40,5 +41,6 @@ export function defaultProjects(
     tracker,
     activeStates: opts.activeStates ?? ['Todo', 'In Progress'],
     terminalStates: opts.terminalStates ?? ['Done', 'Cancelled'],
+    inProgressState: opts.inProgressState ?? 'In Progress',
   });
 }

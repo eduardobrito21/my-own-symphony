@@ -183,39 +183,47 @@ maxRetryBackoffMs)`. No randomization — N concurrent failures
 - **Source:** Plan 21 design discussion ("ITS ENORMOUS....
   must really be this big?") + close-out decision log.
 
-### Pipeline does not transition Linear issue to In Progress at dispatch time
-
-- **What:** When the daemon picks up a Todo issue and
-  dispatches the pipeline, the issue stays in **Todo**
-  state for the entire pipeline run (~3-7 minutes). The
-  agent's close-out only transitions to Done on success or
-  adds the Need-Human-Help label on failure. From a Linear-
-  dashboard perspective, "agent is actively working on this
-  issue" is invisible — it just shows Todo with no signal
-  that work is in flight.
-- **Where:** Hook would go in
-  `packages/daemon/src/orchestrator/orchestrator.ts` at the
-  `dispatchOne` call sites (lines ~270 and ~676), preceded
-  by a new `transitionIssueState` mutation method on the
-  `Tracker` interface (today's interface is read-only).
-- **Why we accept it:** Identified during Plan 21's smokes
-  (operator noticed EDU-37 / EDU-38 stayed Todo through
-  the run). Decided to defer to a separate PR since the
-  required surface is bigger than a one-line fix:
-  - New mutation on `Tracker` interface
-  - Linear adapter: `workflowStates` query + `issueUpdate`
-    mutation
-  - Fake-tracker stub for tests
-  - New config field `in_progress_state` (default "In
-    Progress")
-  - Idempotency + non-blocking error handling
-- **Trigger to revisit:** Next session with a few hours of
-  daemon-side budget. Small, well-scoped — should be a
-  single PR.
-- **Source:** Plan 21 close-out (2026-05-18) + the operator's
-  ask for a deterministic state transition.
-
 ## Paid
+
+### Pipeline does not transition Linear issue to In Progress at dispatch time — 2026-05-18
+
+- **What it was:** Issues stayed in **Todo** for the full
+  pipeline run (~3-7 min). The Linear dashboard had no
+  in-flight signal — only the success (Done) or escalation
+  (Need-Human-Help label) end states were visible. Operator
+  surfaced this during Plan 21's smokes (EDU-37 / EDU-38
+  stayed Todo throughout).
+- **How we paid it:** Plan 23 — deterministic Todo →
+  In Progress transition at dispatch time.
+  - `Tracker` interface extended with `transitionIssueState`
+    returning a 3-variant outcome (`transitioned` / `noop` /
+    `skipped`).
+  - Linear adapter: one new query (`IssueWorkflowStates` —
+    fetches the team's workflow states + the issue's current
+    state in one round-trip) plus one mutation
+    (`IssueUpdateState`). Reused the existing
+    `client.execute` rather than adding a separate
+    `runMutation` method — the client is already
+    operation-agnostic.
+  - Fake tracker symmetry: `transitionCalls` call log +
+    `queueTransitionResult` test hook + optional
+    `availableStates` constructor option for exercising the
+    `skipped` path.
+  - New per-project config field
+    `linear.in_progress_state` (default `"In Progress"`,
+    threaded through `LinearTrackerSpec` → `ProjectContext` →
+    orchestrator). Operators on teams with different state
+    naming (`Doing`, `Active`) override per-project.
+  - Wired into `orchestrator.tick()` (fresh dispatch at
+    line ~271) AND `orchestrator.handleRetryFire()` (retry
+    promotion at line ~677), AFTER eligibility and BEFORE
+    `dispatchOne`. Non-blocking: any error (network, auth,
+    target-state-not-found) logs at WARN and falls through.
+    Pre-flight short-circuit when `issue.state` already
+    matches `inProgressState` (case-insensitive) skips the
+    GraphQL round-trip entirely.
+  - 19 new tests across fake-tracker / Linear adapter /
+    orchestrator / deployment-config surfaces.
 
 ### Exec-plan frontmatter schema not applied to pre-Plan-20 plans — 2026-05-18
 

@@ -125,3 +125,53 @@ export const ISSUE_STATES_BY_IDS_QUERY = `
     }
   }
 `;
+
+// ---- transition issue state (Plan 23) -------------------------------
+
+export interface IssueWorkflowStatesVariables {
+  /** GraphQL ID type. Linear's schema is picky about ID vs String. */
+  readonly issueId: string;
+}
+
+/**
+ * Fetch the workflow states available on the team that owns this
+ * issue, plus the issue's current state name. One round-trip lets
+ * the adapter resolve `targetStateName` → `stateId` AND short-
+ * circuit when the issue is already in the target state — no extra
+ * API call needed for the idempotent path.
+ */
+export const ISSUE_WORKFLOW_STATES_QUERY = `
+  query IssueWorkflowStates($issueId: String!) {
+    issue(id: $issueId) {
+      id
+      state { name }
+      team {
+        states(first: 100) {
+          nodes { id name }
+        }
+      }
+    }
+  }
+`;
+
+export interface IssueUpdateStateVariables {
+  readonly issueId: string;
+  readonly stateId: string;
+}
+
+/**
+ * Move one issue to a workflow state. We only care about the
+ * `success` boolean and the new state name (for logging); a richer
+ * payload would mean more schema to maintain for no caller benefit.
+ */
+export const ISSUE_UPDATE_STATE_MUTATION = `
+  mutation IssueUpdateState($issueId: String!, $stateId: String!) {
+    issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+      success
+      issue {
+        id
+        state { name }
+      }
+    }
+  }
+`;

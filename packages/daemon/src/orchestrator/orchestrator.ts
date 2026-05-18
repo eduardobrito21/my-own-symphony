@@ -25,7 +25,7 @@ import type { WorkspaceManager } from '../workspace/index.js';
 
 import { evaluateRuntimeEligibility } from './eligibility.js';
 import { AsyncLock } from './lock.js';
-import type { ProjectContextMap } from './project.js';
+import type { ProjectContext, ProjectContextMap } from './project.js';
 import { reconcile } from './reconcile.js';
 import { cancelRetry, scheduleRetry } from './retry.js';
 import {
@@ -268,6 +268,7 @@ export class Orchestrator {
         });
         continue;
       }
+      await this.tryTransitionToInProgress(issue, ctx);
       this.dispatchOne(issue, null);
       dispatched += 1;
     }
@@ -300,6 +301,54 @@ export class Orchestrator {
   }
 
   // ---- Dispatch / worker lifecycle -------------------------------------
+
+  /**
+   * Transition the issue to its project's configured `in_progress_state`
+   * BEFORE dispatch so the Linear dashboard reflects "agent working".
+   * Plan 23.
+   *
+   * Non-blocking by design: any failure (network, auth, target state
+   * not found) logs at WARN level and returns. The pipeline still
+   * runs. The transition is observability, not a gate.
+   *
+   * Idempotency: when the pre-fetched `issue.state` already matches
+   * the target (case-insensitive), the API round-trip is skipped
+   * entirely — re-dispatches of in-flight issues don't generate
+   * traffic.
+   */
+  private async tryTransitionToInProgress(issue: Issue, ctx: ProjectContext): Promise<void> {
+    const target = ctx.inProgressState;
+    if (issue.state.toLowerCase() === target.toLowerCase()) {
+      return;
+    }
+    const log = this.logger.with({
+      issue_id: issue.id,
+      issue_identifier: issue.identifier,
+      project_key: issue.projectKey,
+    });
+    const result = await ctx.tracker.transitionIssueState({
+      issueId: issue.id,
+      targetStateName: target,
+    });
+    if (!result.ok) {
+      log.warn('in_progress_transition_failed', {
+        target,
+        error_code: result.error.code,
+        error_message: result.error.message,
+      });
+      return;
+    }
+    const outcome = result.value;
+    if (outcome.kind === 'skipped') {
+      log.warn('in_progress_transition_skipped', {
+        target,
+        reason: outcome.reason,
+        available: outcome.available,
+      });
+      return;
+    }
+    log.info('in_progress_transition', { target, outcome });
+  }
 
   private dispatchOne(issue: Issue, retryAttempt: number | null): void {
     const placeholderSessionId = composeSessionId('pending', issue.id);
@@ -673,6 +722,7 @@ export class Orchestrator {
         agent: this.config.agent,
       });
       if (eligibility.eligible) {
+        await this.tryTransitionToInProgress(issue, ctx);
         this.dispatchOne(issue, entry.attempt);
         return;
       }

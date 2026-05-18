@@ -17,19 +17,44 @@ import type {
   FetchCandidatesArgs,
   Tracker,
   TrackerResult,
+  TransitionIssueStateArgs,
+  TransitionOutcome,
 } from '../tracker.js';
 import type { Issue, IssueId } from '../../types/index.js';
 import { isStateAmong } from '../state-matching.js';
 
+export interface FakeTrackerOptions {
+  /**
+   * Available workflow state names (used to model the
+   * `kind: 'skipped'` outcome of `transitionIssueState` when the
+   * target name doesn't exist). When `undefined`, the fake accepts
+   * any state name as valid — tests that don't exercise the
+   * misconfiguration path don't have to think about it.
+   */
+  readonly availableStates?: readonly string[];
+}
+
 export class FakeTracker implements Tracker {
   private issues: Map<IssueId, Issue>;
+  private readonly availableStates: readonly string[] | null;
+  /** Call log for `transitionIssueState`, in invocation order. Tests
+   *  use it to assert "transition was called once before dispatch". */
+  public readonly transitionCalls: TransitionIssueStateArgs[] = [];
+  /**
+   * If set, the next call to `transitionIssueState` returns this
+   * `TrackerResult` instead of running the normal logic. Test hook
+   * for exercising the orchestrator's non-blocking error path. Reset
+   * to `null` after consumption.
+   */
+  private nextTransitionResult: TrackerResult<TransitionOutcome> | null = null;
 
   /**
    * Construct from an initial list. The list is shallow-copied; future
    * mutations to the original array do not affect the tracker.
    */
-  constructor(initialIssues: readonly Issue[] = []) {
+  constructor(initialIssues: readonly Issue[] = [], options: FakeTrackerOptions = {}) {
     this.issues = new Map(initialIssues.map((issue) => [issue.id, issue]));
+    this.availableStates = options.availableStates ?? null;
   }
 
   // ---- Tracker interface methods --------------------------------------
@@ -60,6 +85,72 @@ export class FakeTracker implements Tracker {
       if (issue !== undefined) matches.push(issue);
     }
     return Promise.resolve({ ok: true, value: matches });
+  }
+
+  transitionIssueState(args: TransitionIssueStateArgs): Promise<TrackerResult<TransitionOutcome>> {
+    this.transitionCalls.push(args);
+
+    if (this.nextTransitionResult !== null) {
+      const queued = this.nextTransitionResult;
+      this.nextTransitionResult = null;
+      return Promise.resolve(queued);
+    }
+
+    const targetLower = args.targetStateName.toLowerCase();
+
+    if (
+      this.availableStates !== null &&
+      !this.availableStates.some((s) => s.toLowerCase() === targetLower)
+    ) {
+      return Promise.resolve({
+        ok: true,
+        value: {
+          kind: 'skipped',
+          reason: 'target-state-not-found',
+          available: this.availableStates,
+        },
+      });
+    }
+
+    const existing = this.issues.get(args.issueId);
+    if (existing === undefined) {
+      // Mirror Linear's behavior: an unknown issue id surfaces as a
+      // typed payload error. Orchestrator path treats this as
+      // non-fatal and proceeds.
+      return Promise.resolve({
+        ok: false,
+        error: {
+          code: 'linear_unknown_payload',
+          message: `FakeTracker.transitionIssueState: unknown issue id ${String(args.issueId)}`,
+        },
+      });
+    }
+
+    const currentStateName = existing.state;
+    if (currentStateName.toLowerCase() === targetLower) {
+      return Promise.resolve({
+        ok: true,
+        value: {
+          kind: 'noop',
+          reason: 'already-in-target-state',
+          currentStateName,
+        },
+      });
+    }
+
+    // Resolve the target's canonical casing if availableStates was
+    // provided; otherwise pass through the operator-supplied casing.
+    const canonical =
+      this.availableStates?.find((s) => s.toLowerCase() === targetLower) ?? args.targetStateName;
+    this.issues.set(args.issueId, { ...existing, state: canonical });
+    return Promise.resolve({
+      ok: true,
+      value: {
+        kind: 'transitioned',
+        fromStateName: currentStateName,
+        toStateName: canonical,
+      },
+    });
   }
 
   // ---- Test mutators --------------------------------------------------
@@ -103,5 +194,15 @@ export class FakeTracker implements Tracker {
    */
   getIssue(id: IssueId): Issue | undefined {
     return this.issues.get(id);
+  }
+
+  /**
+   * Queue a specific `TrackerResult` for the next
+   * `transitionIssueState` call. Used by orchestrator tests to
+   * exercise the non-blocking error path without setting up a real
+   * misconfiguration.
+   */
+  queueTransitionResult(result: TrackerResult<TransitionOutcome>): void {
+    this.nextTransitionResult = result;
   }
 }

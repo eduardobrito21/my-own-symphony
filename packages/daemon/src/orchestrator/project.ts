@@ -52,6 +52,12 @@ export interface ProjectContext {
    *  the Linear normalizer already lowercased; we expect the
    *  builder to lowercase configured values before passing here). */
   readonly excludedLabels: readonly string[];
+  /** Workflow state name the orchestrator transitions an issue to
+   *  immediately before dispatch so the Linear UI reflects in-flight
+   *  work. From `linear.in_progress_state`; defaults to
+   *  `"In Progress"`. Case-insensitive match against the team's
+   *  workflow states. Plan 23. */
+  readonly inProgressState: string;
 }
 
 /** Insertion-ordered map of project contexts. Order is the
@@ -73,6 +79,7 @@ export function singleProjectContext(args: {
   readonly activeStates: readonly string[];
   readonly terminalStates: readonly string[];
   readonly excludedLabels?: readonly string[];
+  readonly inProgressState?: string;
 }): ProjectContextMap {
   const ctx: ProjectContext = {
     key: args.key,
@@ -80,6 +87,7 @@ export function singleProjectContext(args: {
     activeStates: args.activeStates,
     terminalStates: args.terminalStates,
     excludedLabels: args.excludedLabels ?? [],
+    inProgressState: args.inProgressState ?? 'In Progress',
   };
   return new Map([[args.key, ctx]]);
 }

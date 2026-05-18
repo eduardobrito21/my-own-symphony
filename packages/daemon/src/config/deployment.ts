@@ -170,6 +170,13 @@ export function buildDeploymentConfigSchema(baseDir: string) {
       // case-insensitive — the Linear normalizer already lowercases
       // labels; we lowercase configured values to match.
       excluded_labels: z.array(z.string().min(1)).default([]),
+      // Workflow state the orchestrator transitions an issue to at
+      // dispatch time so the Linear UI reflects "agent working".
+      // Match is case-insensitive against the team's available
+      // workflow states. To effectively disable, set to a state name
+      // already in `active_states` (e.g. `Todo`) — the transition
+      // becomes a noop. Plan 23.
+      in_progress_state: z.string().min(1).default('In Progress'),
     })
     .strict();
 
