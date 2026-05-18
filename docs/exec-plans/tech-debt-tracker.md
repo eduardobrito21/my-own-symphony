@@ -186,6 +186,68 @@ abandoned`, plus `linear_issue`, `github_pr`, `created`,
 - **Source:** Plan 20 close-out decision log (Stage 20-1
   deferred).
 
+### Parent prompt is at ~17k chars; should be compressed
+
+- **What:** `parent-prompt.ts` produces a ~17k-char system
+  prompt per dispatch (up from ~12k pre-Plan-21). Operator
+  flagged it as "enormous" during 21's design discussion;
+  every plan since 18a has added per-stage boilerplate that
+  duplicates across Stages 2-6 (local-\* + namespace-devbox
+  branches written four times each). The dispatch-template
+  explanation block is also longer than it needs to be (the
+  LLM doesn't need to understand WHY `printf` + heredoc
+  works — just to copy the template).
+- **Where:** `packages/daemon/src/agent/pipeline/parent-prompt.ts`
+  (the per-stage sections + the dispatch-template how-it-works
+  block) plus the prompt-size budget assertion in
+  `parent-prompt.test.ts` (currently 19k; should drop with
+  the prompt itself).
+- **Why we accept it:** Token cost is negligible (system
+  prompt is cached after first dispatch). Cost is
+  maintenance surface: when the pipeline shape evolves
+  again, we touch the same boilerplate 4-8x. Compressing it
+  now risks breaking what works — Plan 21's smokes proved
+  the current prompt is Haiku-followable.
+- **Trigger to revisit:** Next plan that adds or removes a
+  stage. Compress before adding to the existing per-stage
+  duplication. Target: collapse Stages 2-6 into one
+  "per-stage dispatch shape" section + a small table of
+  stage-specific inputs. Aim for 8-10k chars total.
+- **Source:** Plan 21 design discussion ("ITS ENORMOUS....
+  must really be this big?") + close-out decision log.
+
+### Pipeline does not transition Linear issue to In Progress at dispatch time
+
+- **What:** When the daemon picks up a Todo issue and
+  dispatches the pipeline, the issue stays in **Todo**
+  state for the entire pipeline run (~3-7 minutes). The
+  agent's close-out only transitions to Done on success or
+  adds the Need-Human-Help label on failure. From a Linear-
+  dashboard perspective, "agent is actively working on this
+  issue" is invisible — it just shows Todo with no signal
+  that work is in flight.
+- **Where:** Hook would go in
+  `packages/daemon/src/orchestrator/orchestrator.ts` at the
+  `dispatchOne` call sites (lines ~270 and ~676), preceded
+  by a new `transitionIssueState` mutation method on the
+  `Tracker` interface (today's interface is read-only).
+- **Why we accept it:** Identified during Plan 21's smokes
+  (operator noticed EDU-37 / EDU-38 stayed Todo through
+  the run). Decided to defer to a separate PR since the
+  required surface is bigger than a one-line fix:
+  - New mutation on `Tracker` interface
+  - Linear adapter: `workflowStates` query + `issueUpdate`
+    mutation
+  - Fake-tracker stub for tests
+  - New config field `in_progress_state` (default "In
+    Progress")
+  - Idempotency + non-blocking error handling
+- **Trigger to revisit:** Next session with a few hours of
+  daemon-side budget. Small, well-scoped — should be a
+  single PR.
+- **Source:** Plan 21 close-out (2026-05-18) + the operator's
+  ask for a deterministic state transition.
+
 ## Paid
 
 (empty)
