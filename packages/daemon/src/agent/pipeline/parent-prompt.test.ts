@@ -58,6 +58,7 @@ describe('buildParentPrompt — label surfacing', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).toContain('- Labels: (none)');
@@ -69,6 +70,7 @@ describe('buildParentPrompt — label surfacing', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).toContain('- Labels: sandbox:namespace, priority:high');
@@ -80,6 +82,7 @@ describe('buildParentPrompt — label surfacing', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     const stage1 = prompt.indexOf('## Stage 1 — Dispatch @sandbox');
@@ -103,6 +106,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     const order = [
@@ -130,6 +134,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     // Both @curator (Stage 4) and @ci (Stage 5) must be skipped on a
@@ -145,6 +150,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).toContain('- URL: https://linear.app/example/issue/EDU-77');
@@ -159,11 +165,77 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).toMatch(/Curator findings/);
     expect(prompt).toMatch(/CuratorResult\.flags/);
     expect(prompt).toMatch(/auto_fixes[^.]*do not include/i);
+  });
+
+  it('legacy close-out: with null escalationLabel, failures still transition to Done', () => {
+    // Back-compat: an operator with no `excluded_labels` config gets
+    // the pre-Plan-21 behavior (failures → Done with a failure
+    // comment, no label-add).
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      escalationLabel: null,
+    });
+
+    // The close-out section should NOT mention issueAddLabel or any
+    // escalation branching when escalationLabel is null.
+    expect(prompt).not.toMatch(/issueAddLabel/);
+    expect(prompt).not.toMatch(/Need Human Help/i);
+    expect(prompt).not.toMatch(/Branch A — Success/);
+    // It SHOULD still describe the standard Done transition.
+    expect(prompt).toMatch(/transition.*Done/i);
+    expect(prompt).toMatch(/workflowStates/);
+  });
+
+  it('escalation close-out: failures add the configured label and do NOT transition state', () => {
+    // Plan 21 escalation pattern: when a pipeline stage fails, the
+    // parent agent's close-out adds the operator-configured label
+    // (typically "Need Human Help") to the issue and leaves the
+    // state alone. The orchestrator's next-tick filter
+    // (`linear.excluded_labels`) then skips the issue.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      escalationLabel: 'Need Human Help',
+    });
+
+    // The close-out section gains a failure branch with the label-add.
+    expect(prompt).toMatch(/issueAddLabel/);
+    expect(prompt).toMatch(/Need Human Help/);
+    // The success branch still does the Done transition.
+    expect(prompt).toMatch(/Step B — success outcomes/);
+    expect(prompt).toMatch(/workflowStates/);
+    // Failure branch explicitly says NO state transition.
+    expect(prompt).toMatch(/Do NOT transition the issue state/);
+    // Fallback documented for missing-label case.
+    expect(prompt).toMatch(/FALL BACK to transitioning/);
+  });
+
+  it('escalation label name is rendered verbatim in the prompt body', () => {
+    // The operator could choose any label name; the prompt threads
+    // it through. Test with an unusual name to make sure we don't
+    // hardcode "Need Human Help" anywhere.
+    const prompt = buildParentPrompt({
+      issue: makeIssue(),
+      repoUrl: 'https://github.com/example/repo.git',
+      defaultBranch: 'main',
+      branchPrefix: 'symphony/',
+      escalationLabel: 'Blocked-By-Symphony',
+    });
+
+    expect(prompt).toMatch(/Blocked-By-Symphony/);
+    // Negative: an unrelated label name should not leak.
+    expect(prompt).not.toMatch(/Need Human Help/);
   });
 
   it('threads plan_path from PlannerResult into the @coder dispatch', () => {
@@ -176,6 +248,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     const stage3 = prompt.indexOf('## Stage 3 — Dispatch @coder');
@@ -196,6 +269,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).toMatch(/Dispatch routing for Stages 2-5/);
@@ -229,6 +303,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).toMatch(/secret hygiene/i);
@@ -246,6 +321,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     for (const stage of [
@@ -276,6 +352,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
 
     expect(prompt).not.toContain('Step 0 — Pick the backend');
@@ -296,6 +373,7 @@ describe('buildParentPrompt — pipeline shape', () => {
       repoUrl: 'https://github.com/example/repo.git',
       defaultBranch: 'main',
       branchPrefix: 'symphony/',
+      escalationLabel: null,
     });
     expect(prompt.length).toBeLessThan(12000);
   });
