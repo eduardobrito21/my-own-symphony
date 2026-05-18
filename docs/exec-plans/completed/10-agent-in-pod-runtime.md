@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-30
+updated: 2026-04-30
+closed: 2026-04-30
+---
+
 # Plan 10 — Agent-in-pod runtime + LocalDockerBackend
 
-- **Status:** ✅ Complete — smoke verified end-to-end on 2026-04-30 (one Linear issue, full docker pod path, ~12s + $0.035 / turn).
 - **Extracted from:** original Plan 09 stage 09d. Split out as
   its own plan so the pod runtime can be built and verified
   independently from the multi-project foundation (Plan 09 ships

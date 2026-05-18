@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-05-17
+updated: 2026-05-17
+closed: 2026-05-17
+---
+
 # Plan 17a — Multi-backend `@sandbox` dispatcher (Namespace + local)
 
-- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** ADR 0014's "the @infra agent's skill picks per
   dispatch" framing for the platform choice between local docker,
   Namespace microVM, and (placeholder) AWS.

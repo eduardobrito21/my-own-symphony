@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-30
+updated: 2026-05-16
+closed: 2026-05-16
+---
+
 # Plan 13 — Deployable services + v1 polish
 
-- **Status:** Withdrawn (2026-05-17) — superseded by Plan 15 / ADR 0014
 - **Supersession note (2026-05-17):** ADR 0014 collapses this
   plan's premise. Without an `ExecutionBackend`, an
   agent-runtime package, or in-pod containers, there is nothing

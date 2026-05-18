@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-30
+updated: 2026-04-30
+closed: 2026-04-30
+---
+
 # Plan 09 — Multi-project orchestration + ExecutionBackend foundation
 
-- **Status:** 📝 Drafted (Stages 09a + 09b + 09c + 09d complete)
 - **Replaces:** the original Plan 09 (Docker + polish, scope was
   too broad), the original Plan 10 (E2B cloud devbox), and the
   prior 09 draft (multi-project + agent-on-host shelling into

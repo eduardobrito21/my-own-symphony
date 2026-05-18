@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-05-18
+updated: 2026-05-18
+closed: 2026-05-18
+---
+
 # Plan 21 — Agentic loop, target-repo recipes, escalation integration
 
-- **Status:** ✅ Complete (2026-05-18)
 - **Implements:** The iterating sensor loop that turns Symphony
   from a one-shot pipeline (one `@coder` pass, ship it) into an
   agentic system that converges on a working PR through

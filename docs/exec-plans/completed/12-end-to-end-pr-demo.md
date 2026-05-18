@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-30
+updated: 2026-05-16
+closed: 2026-05-16
+---
+
 # Plan 12 — End-to-end real PR demo + Symphony self-hosting
 
-- **Status:** Withdrawn (2026-05-17) — high-level goal absorbed by Plan 19 (`@ci` skill opens the PR); pipeline smoke validations now live inside the sub-agent pipeline itself (proven against EDU-13 on 2026-05-17). This plan was always a verification doc, not a code plan; with Plan 16's chassis in and Plan 19 owning the actual PR-opening, nothing here needs to be re-executed standalone.
 - **Supersession note (2026-05-17):** the high-level goal — a
   real Linear issue triggers a real PR on a real GitHub repo,
   end-to-end — survives ADR 0014. What changes:

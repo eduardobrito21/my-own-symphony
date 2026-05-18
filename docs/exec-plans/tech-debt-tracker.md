@@ -153,39 +153,6 @@ maxRetryBackoffMs)`. No randomization — N concurrent failures
 - **Source:** Plan 07 (Claude Agent SDK integration), "Risks
   adopted from SDK research."
 
-### Exec-plan frontmatter schema not applied to pre-Plan-20 plans; `@curator` Rule 2 is a no-op against them
-
-- **What:** Plan 20 defined a YAML frontmatter state machine
-  for exec plans (`status: proposed | active | completed |
-abandoned`, plus `linear_issue`, `github_pr`, `created`,
-  `updated`, `closed`). New plans written by `@planner` use it.
-  Existing plans (both `active/` and `completed/`) instead use
-  an ad-hoc `- **Status:** ✅ Complete (YYYY-MM-DD)` markdown
-  bullet at the top. `@curator`'s Rule 2 (exec-plan lifecycle
-  integrity) expects YAML frontmatter and therefore cannot run
-  against the legacy format. Rules 1 (cross-references) and 3
-  (index parity) are unaffected.
-- **Where:** every file under `docs/exec-plans/active/` and
-  `docs/exec-plans/completed/` (pre-Plan-20). Curator's
-  expectations live in `packages/daemon/src/skills/curator/SKILL.md`
-  (Rule 2 section); planner's output format in
-  `packages/daemon/src/skills/planner/SKILL.md`.
-- **Why we accept it:** Backfill across ~20 plans is a one-shot
-  ~hour task. Plan 20 prioritized shipping the planner+curator
-  contracts and live wiring; the format chore can wait. Until
-  it ships, curator's harness audit covers 2 of 3 rules on
-  legacy plans, which is still net-positive for go-forward work.
-- **Trigger to revisit:** Operator wants curator to enforce
-  exec-plan lifecycle transitions across the whole tree, OR a
-  dispatch surfaces format-drift confusion (e.g. `@planner`
-  writes a YAML-frontmatter plan and `@curator` flags an
-  inconsistency it can't reconcile against the legacy format).
-  One-shot fix: write a backfill script that derives `status:`
-  from directory location, `created:`/`updated:` from
-  `git log --follow`, the rest hand-edited.
-- **Source:** Plan 20 close-out decision log (Stage 20-1
-  deferred).
-
 ### Parent prompt is at ~17k chars; should be compressed
 
 - **What:** `parent-prompt.ts` produces a ~17k-char system
@@ -250,4 +217,33 @@ abandoned`, plus `linear_issue`, `github_pr`, `created`,
 
 ## Paid
 
-(empty)
+### Exec-plan frontmatter schema not applied to pre-Plan-20 plans — 2026-05-18
+
+- **What it was:** Plan 20 defined a YAML frontmatter state
+  machine for exec plans (`status`, `linear_issue`,
+  `github_pr`, `created`, `updated`, `closed`). New plans
+  written by `@planner` used it; pre-existing plans (all 22
+  legacy + the 4 hand-drafted post-20 plans) used the old
+  `- **Status:** …` markdown bullet, so `@curator`'s Rule 2
+  (exec-plan lifecycle integrity) was a no-op against the
+  whole legacy tree.
+- **How we paid it:** Backfill script — for each file under
+  `docs/exec-plans/active/` and `docs/exec-plans/completed/`,
+  prepended a YAML frontmatter block. `created:` derived from
+  `git log --diff-filter=A --follow`, `updated:` from
+  `git log -1`, `status:` from directory location (`active/` →
+  `proposed`, `completed/` → `completed`), `closed:` set to
+  `updated:` for completed plans (null for active). Same pass
+  also stripped the now-redundant legacy `- **Status:** …` and
+  `- **Started:** … / **Completed:** …` markdown bullets
+  (including their multi-line continuations), since the
+  frontmatter is the single source of truth `@curator`
+  consumes. Narrative annotations that lived inside the
+  stripped bullets ("with deferrals — see Decision log") are
+  reachable via the actual Decision log in each plan.
+- **What's not paid:** `linear_issue` and `github_pr` are
+  `null` across the backfilled tree — deriving them from git
+  history would be brittle (PR numbers don't map 1:1 to plan
+  files, especially across stacked PRs). The fields are
+  present, just unfilled. Future plans written by `@planner`
+  will populate them at creation time.

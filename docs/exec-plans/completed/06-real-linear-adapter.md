@@ -1,8 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-29
+updated: 2026-04-29
+closed: 2026-04-29
+---
+
 # Plan 06 — Real Linear adapter
 
-- **Status:** ✅ Complete
-- **Started:** 2026-04-28
-- **Completed:** 2026-04-29
 - **Spec sections:** §11 (Issue Tracker Integration Contract — Linear-
   Compatible)
 - **Layers touched:** `tracker/`, `config/` (Linear-specific defaults),

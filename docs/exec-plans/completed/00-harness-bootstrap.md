@@ -1,8 +1,13 @@
-# Plan 00 — Harness bootstrap
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-04-28
+updated: 2026-04-28
+closed: 2026-04-28
+---
 
-- **Status:** Complete
-- **Started:** 2026-04-28
-- **Completed:** 2026-04-28
+# Plan 00 — Harness bootstrap
 
 ## Goal
 

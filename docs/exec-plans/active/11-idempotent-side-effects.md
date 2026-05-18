@@ -1,9 +1,14 @@
+---
+status: proposed
+linear_issue: null
+github_pr: null
+created: 2026-04-30
+updated: 2026-05-16
+closed: null
+---
+
 # Plan 11 — Idempotent side effects (slim)
 
-- **Status:** 📝 Drafted (framing reshaped 2026-05-17 for the
-  sub-agent pipeline; Steps below still reference pre-Plan-15
-  files and need re-targeting before execution — see "Reshape
-  note 2026-05-17" below).
 - **Reshape note 2026-05-17 (post-ADR-0014):** the previous
   reshape (2026-04-30) was rationalized against ADR 0012's
   Namespace backend, which ADR 0014 has since superseded. The

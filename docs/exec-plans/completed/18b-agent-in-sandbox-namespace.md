@@ -1,6 +1,14 @@
+---
+status: completed
+linear_issue: null
+github_pr: null
+created: 2026-05-17
+updated: 2026-05-17
+closed: 2026-05-17
+---
+
 # Plan 18b — Sub-agents run inside the Namespace sandbox
 
-- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** ADR 0015 ("sub-agents run in the sandbox they
   operate on") for the `namespace-devbox` backend. After this plan
   ships, a `sandbox:namespace`-labelled dispatch executes
