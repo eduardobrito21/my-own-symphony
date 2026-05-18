@@ -1,6 +1,6 @@
 # Plan 18c — Bare microVM for `@sandbox` (drop the container layer)
 
-- **Status:** Not started
+- **Status:** ✅ Complete (2026-05-17)
 - **Implements:** A direct simplification of Plan 18b. Same goal
   (sub-agents run in the sandbox they operate on, per ADR 0015) and
   same backend (Namespace), but the per-dispatch environment becomes
@@ -415,3 +415,74 @@ sidecar, etc.). Reasons we rejected the hybrid:
   property (audit log) is the only loss, and it's recoverable
   later by routing all secret reads through a daemon-side
   audit log if we ever care.
+
+### 2026-05-17 — Plan close-out
+
+Shipped via PR #35 (implementation + 7 smoke-discovered fixes,
+amended into the same branch). Live-smoked end-to-end on EDU-33:
+PR opened in the target repo at
+`https://github.com/eduardobrito21/my-own-symphony-test/pull/9`,
+~3m01s end-to-end.
+
+The smoke was 8 iterations, each catching one bug that local
+unit tests and the round-trip protocol test couldn't see. The
+sequence is interesting on its own — it illustrates how much
+"obvious code" hides surprises when it hits a new OS + a new
+runtime + a new identity:
+
+| #   | Issue  | Bug                                                                                                                      | Fix                                                                                                             |
+| --- | ------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| 1   | EDU-26 | `useradd` not pre-installed on Wolfi (assumed it was)                                                                    | `apk add shadow` in bootstrap                                                                                   |
+| 2   | EDU-27 | claude on PATH only via `~/.bashrc`; `su -c` doesn't source it                                                           | Explicit PATH export at every `su -c` site                                                                      |
+| 3   | EDU-28 | INPUTS_JSON dispatched as a single-quoted argv arg; broke on the apostrophe in `Don't`                                   | Redesigned dispatch contract to stdin-only with a `---SYMPHONY-INPUTS---` sentinel + literal heredoc for inputs |
+| 4   | EDU-29 | `su -p` preserves `HOME=/root`; claude tried to write `/root/.claude/`, EPERM, exits 0 silently                          | `export HOME=/home/symphony` inside the su body                                                                 |
+| 5   | EDU-30 | Clone wrapped in `su symphony -c "bash …"` got argv-split by the `nsc ssh` whitespace gotcha; clone silently no-op'd     | Clone as root, then `chown -R symphony /workspace`, then sanity-check `/workspace/.git` exists                  |
+| 6   | EDU-31 | PATH override _replaced_ `/sbin` instead of prepending; Wolfi puts `git`/`gh`/`jq` in `/sbin`, so @ci couldn't find `gh` | Prepend the claude install dirs to `$PATH`, don't replace                                                       |
+| 7   | EDU-32 | `gh` is NOT pre-installed on Wolfi (only `git` is — I'd misread an earlier probe that had explicitly `apk add`-ed it)    | `apk add gh` in bootstrap                                                                                       |
+| 8   | EDU-33 | **ALL GREEN.** Full 6-stage pipeline, PR opened, instance destroyed cleanly.                                             | —                                                                                                               |
+
+Each iteration: average ~3–4 minutes (provision + dispatch +
+teardown). Total smoke cost: small enough not to matter; the
+operator-time signal-to-noise ratio was very high (each iter
+produced one actionable fix).
+
+Observations worth keeping:
+
+- **Wolfi (kernel 6.16) is a tighter base than the operator
+  Dockerfile we deleted.** Multiple tools we assumed
+  ship by default don't — `useradd`, `gh`, possibly more.
+  `apk add` is fast and idempotent; bootstrap can `apk add`
+  whatever's missing without ceremony. If a future stage
+  surfaces another missing tool, add a `if ! command -v X` block
+  in `bootstrap.sh`.
+- **`su -p` preserves env but NOT identity for HOME/USER
+  purposes.** Anything that touches `$HOME` needs an explicit
+  override at the `su -c` boundary.
+- **`nsc ssh -T --` argv-split is still load-bearing.** Plan
+  18b documented it; this plan caught a reintroduction in the
+  clone step. Anything multi-token at the `nsc ssh --` boundary
+  needs to be an uploaded script invoked by absolute path.
+- **`nsc ssh` exit codes leak through to local `$?`** in this
+  Wolfi-microVM path (no exit-code-laundering through a
+  container-runtime exec primitive). That's better than the
+  Plan-17a container-side observation; the tech-debt entry on
+  this stays open as a precaution for future remote backends,
+  but the namespace-devbox path is fine as-is.
+- **claude's silent-zero-bytes-exit-0 failure mode on EPERM
+  is worth a SDK bug report.** A non-interactive
+  `claude --print` failing to access its config dir should at
+  minimum print a one-line diagnostic on stderr.
+
+What was deferred (none):
+
+- Plan 18c had no scope drop. The custom-VM-image follow-up
+  (pre-bake claude + apk packages) was already explicitly
+  out-of-scope; cold-start was acceptable in the smoke
+  (~1m for the bootstrap phase including two `apk add`s and
+  the claude installer).
+
+What 18c **does NOT yet unlock**:
+
+- Plan 21's agentic loop (`@env-up`, `@verify`, `@code-review`)
+  still needs to be designed and shipped. 18c only proves the
+  sandbox flavor supports it (root + docker + apk available).

@@ -282,7 +282,7 @@ The agent runs directly on the VM. The VM is the container.
 ## Schedule
 
 This decision is implemented in
-[Plan 14](../exec-plans/active/14-namespace-execution-backend.md).
+[Plan 14](../exec-plans/completed/14-namespace-execution-backend.md).
 LocalDockerBackend remains in the codebase and remains the
 default in `symphony.yaml` examples for "I just want to try it
 on my laptop" use cases until Plan 14 ships and the
